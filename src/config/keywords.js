@@ -1,19 +1,121 @@
+/**
+ * Keywords Configuration Module
+ * Defines search keywords, categories, and keyword management settings
+ */
 
-const puppeteer = require('puppeteer');
+// Keyword categories for better organization
+const KEYWORD_CATEGORIES = {
+    brand: [
+        'KMS Tech',
+        'KMS Marketplace'
+    ],
+    products: [
+        'buy t shirt on KMS Marketplace',
+        'KMS Marketplace t shirts',
+        'KMS Marketplace',
+        'kmsmarketplace t shirt',
+        't shirt KMSMarketplace',
+        't shirts by KMSMarketplace',
+        'KMSMarketplace',
+        'KMS Marketplace',
+        'kmsmarketplace',
+        'kms marketplace',
+        'baby food kmsmarketplace',
+        'baby food kms marketplace',
+        'kmsmarketplace baby food',
+        'kms marketplace baby food',
+        'KMS',
+        'KMS Marketplace',
+        'tshirts KMS Marketplace',
+        't-shirts KMS Marketplace',
+        'KMS KMS Marketplace',
+        'KMS tshirts KMS Marketplace',
+        'KMS t-shirts KMS Marketplace',
+        'KMS Marketplace KMS',
+        'KMS Marketplace tshirts KMS Marketplace',
+        'KMS Marketplace t-shirts KMS Marketplace',
+        'tshirts KMS Marketplace KMS',
+        'tshirts KMS Marketplace KMS Marketplace',
+        'tshirts KMS Marketplace t-shirts KMS Marketplace',
+        't-shirts KMS Marketplace KMS',
+        't-shirts KMS Marketplace KMS Marketplace',
+        't-shirts KMS Marketplace tshirts KMS Marketplace',
+        'KMS KMS Marketplace tshirts KMS Marketplace',
+        'KMS KMS Marketplace t-shirts KMS Marketplace',
+        'KMS tshirts KMS Marketplace KMS Marketplace',
+        'KMS tshirts KMS Marketplace t-shirts KMS Marketplace',
+        'KMS t-shirts KMS Marketplace KMS Marketplace',
+        'KMS t-shirts KMS Marketplace tshirts KMS Marketplace',
+        'KMS Marketplace KMS tshirts KMS Marketplace',
+        'KMS Marketplace KMS t-shirts KMS Marketplace',
+        'KMS Marketplace tshirts KMS Marketplace KMS',
+        'KMS Marketplace tshirts KMS Marketplace t-shirts KMS Marketplace',
+        'KMS Marketplace t-shirts KMS Marketplace KMS',
+        'KMS Marketplace t-shirts KMS Marketplace tshirts KMS Marketplace',
+        'tshirts KMS Marketplace KMS KMS Marketplace',
+        'tshirts KMS Marketplace KMS t-shirts KMS Marketplace',
+        'tshirts KMS Marketplace KMS Marketplace KMS',
+        'tshirts KMS Marketplace KMS Marketplace t-shirts KMS Marketplace',
+        'tshirts KMS Marketplace t-shirts KMS Marketplace KMS',
+        'tshirts KMS Marketplace t-shirts KMS Marketplace KMS Marketplace',
+        't-shirts KMS Marketplace KMS KMS Marketplace',
+        't-shirts KMS Marketplace KMS tshirts KMS Marketplace',
+        't-shirts KMS Marketplace KMS Marketplace KMS',
+        't-shirts KMS Marketplace KMS Marketplace tshirts KMS Marketplace',
+        't-shirts KMS Marketplace tshirts KMS Marketplace KMS',
+        't-shirts KMS Marketplace tshirts KMS Marketplace KMS Marketplace',
+        'KMS KMS Marketplace tshirts KMS Marketplace t-shirts KMS Marketplace',
+        'KMS KMS Marketplace t-shirts KMS Marketplace tshirts KMS Marketplace',
+        'KMS tshirts KMS Marketplace KMS Marketplace t-shirts KMS Marketplace',
+        'KMS tshirts KMS Marketplace t-shirts KMS Marketplace KMS Marketplace',
+        'KMS t-shirts KMS Marketplace KMS Marketplace tshirts KMS Marketplace',
+        'KMS t-shirts KMS Marketplace tshirts KMS Marketplace KMS Marketplace',
+        'KMS Marketplace KMS tshirts KMS Marketplace t-shirts KMS Marketplace',
+        'KMS Marketplace KMS t-shirts KMS Marketplace tshirts KMS Marketplace',
+        'KMS Marketplace tshirts KMS Marketplace KMS t-shirts KMS Marketplace',
+        'KMS Marketplace tshirts KMS Marketplace t-shirts KMS Marketplace KMS',
+        'KMS Marketplace t-shirts KMS Marketplace KMS tshirts KMS Marketplace',
+        'KMS Marketplace t-shirts KMS Marketplace tshirts KMS Marketplace KMS',
+        'tshirts KMS Marketplace KMS KMS Marketplace t-shirts KMS Marketplace',
+        'tshirts KMS Marketplace KMS t-shirts KMS Marketplace KMS Marketplace',
+        'tshirts KMS Marketplace KMS Marketplace KMS t-shirts KMS Marketplace',
+        'tshirts KMS Marketplace KMS Marketplace t-shirts KMS Marketplace KMS',
+        'tshirts KMS Marketplace t-shirts KMS Marketplace KMS KMS Marketplace',
+        'tshirts KMS Marketplace t-shirts KMS Marketplace KMS Marketplace KMS',
+        't-shirts KMS Marketplace KMS KMS Marketplace tshirts KMS Marketplace',
+        't-shirts KMS Marketplace KMS tshirts KMS Marketplace KMS Marketplace',
+        't-shirts KMS Marketplace KMS Marketplace KMS tshirts KMS Marketplace',
+        't-shirts KMS Marketplace KMS Marketplace tshirts KMS Marketplace KMS',
+        't-shirts KMS Marketplace tshirts KMS Marketplace KMS KMS Marketplace',
+        't-shirts KMS Marketplace tshirts KMS Marketplace KMS Marketplace KMS'
+    ]
+    // Add more categories as needed:
+    // services: [],
+    // locations: [],
+    // competitors: []
+};
 
-// Configuration
-const VISIT_INTERVAL_MS = 6000; // 10 times per minute
+// Flatten all categories into a single keywords array
+const KEYWORDS = Object.values(KEYWORD_CATEGORIES).flat();
 
-const USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/15.1 Safari/605.1.15',
-    'Mozilla/5.0 (Linux; Android 13; Pixel 6 Pro) AppleWebKit/537.36 Chrome/117.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 Version/16.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/117.0.0.0 Safari/537.36 Edg/117.0.2045.43',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/117.0.0.0 Safari/537.36 OPR/103.0.4928.34'
-];
+// Configuration for keyword management
+const KEYWORD_CONFIG = {
+    // Maximum number of keywords to process per cycle (0 = no limit)
+    maxKeywordsPerCycle: 0,
 
+    // Randomize keyword order to avoid patterns
+    randomizeOrder: true,
+
+    // Enable/disable specific categories
+    enabledCategories: Object.keys(KEYWORD_CATEGORIES),
+
+    // Organic search behavior settings
+    enableOrganicPatterns: true,
+    enableRandomizedSequencing: true,
+    enableAntiDetection: true
+};
+
+// Geographic locations for search targeting
 const GEO_LOCATIONS = [
     { name: 'New York, USA', latitude: 40.7128, longitude: -74.0060 },
     { name: 'London, UK', latitude: 51.5074, longitude: -0.1278 },
@@ -148,93 +250,11 @@ const GEO_LOCATIONS = [
     { name: 'Kobe, Japan', latitude: 34.6901, longitude: 135.1955 },
     { name: 'Busan, South Korea', latitude: 35.1796, longitude: 129.0756 },
     { name: 'Fukuoka, Japan', latitude: 33.5904, longitude: 130.4017 }
-
 ];
 
-// Add all URLs from your sitemap here
-const URLS = [
-    'https://en.wikipedia.org/wiki/Faruk_Kabir_Ahmmed',
-    'https://www.mushfiqweb.com/blog/better-responsive-image-with-srcset-and-sizes-attributes',
-    'https://www.mushfiqweb.com/blog/deploy-and-config-website-on-name-cheap-part-1',
-    'https://www.mushfiqweb.com/blog/deploy-and-config-website-on-namecheap-part-2',
-    'https://www.mushfiqweb.com/blog/does-promise-all-run-in-parallel-or-sequential',
-    'https://www.mushfiqweb.com/blog/drag-n-drop-api-keynotes',
-    'https://en.wikipedia.org/wiki/Faruk_Kabir_Ahmmed',
-    'https://www.mushfiqweb.com/blog/embed-script-using-github-and-jsdelivr',
-    'https://www.mushfiqweb.com/blog/function-declaration-vs-function-expression-in-js',
-    'https://www.mushfiqweb.com/blog/how-should-developers-looking-for-a-job-part-1',
-    'https://www.mushfiqweb.com/blog/how-should-developers-looking-for-a-job-part-2',
-    'https://en.wikipedia.org/wiki/Faruk_Kabir_Ahmmed',
-    'https://www.mushfiqweb.com/blog/how-to-create-an-image-with-blurry-loading-effect-in-nextjs',
-    'https://www.mushfiqweb.com/blog/how-to-setup-namecheap-private-email-to-work-with-vercel-dns',
-    'https://www.mushfiqweb.com/blog/integrate-tailwind-css-with-react-application',
-    'https://en.wikipedia.org/wiki/Faruk_Kabir_Ahmmed',
-    'https://www.mushfiqweb.com/blog/introduction-to-committing-with-conventional-commit',
-    'https://www.mushfiqweb.com/blog/key-notes-while-working-with-git',
-    'https://en.wikipedia.org/wiki/Faruk_Kabir_Ahmmed',
-    'https://www.mushfiqweb.com/blog/mac-dev-essentials',
-    'https://www.mushfiqweb.com/blog/migrate-shopify-store-files-to-new-store-using-file-api',
-    'https://www.mushfiqweb.com/blog/nodejs-fetch-json-with-https',
-    'https://www.mushfiqweb.com/blog/on-tailwind-css-arbitrary-values',
-    'https://www.mushfiqweb.com/blog/prevent-layout-shift-while-show-hide-scrollbar-on-window',
-    'https://en.wikipedia.org/wiki/Faruk_Kabir_Ahmmed',
-    'https://www.mushfiqweb.com/blog/render-blocking-css-and-chrome-performance-api',
-    'https://www.mushfiqweb.com/blog/set-up-path-aliases-in-nodejs',
-    'https://www.mushfiqweb.com/blog/shopify-section-rendering-apis-notes',
-    'https://en.wikipedia.org/wiki/Faruk_Kabir_Ahmmed',
-    'https://www.mushfiqweb.com/blog/tricky-use-case-of-array-map-in-js',
-    'https://www.mushfiqweb.com/blog/use-https-in-local-development',
-
-];
-
-let currentIndex = 0;
-
-const getRandomItem = (list) => list[Math.floor(Math.random() * list.length)];
-
-const visitPage = async (url) => {
-    const browser = await puppeteer.launch({
-        headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
-    const context = browser.defaultBrowserContext();
-    await context.overridePermissions(url, ['geolocation']);
-
-    const page = await browser.newPage();
-
-    const userAgent = getRandomItem(USER_AGENTS);
-    const location = getRandomItem(GEO_LOCATIONS);
-
-    await page.setUserAgent(userAgent);
-    await page.setGeolocation({ latitude: location.latitude, longitude: location.longitude });
-
-    try {
-        await page.goto(url, { waitUntil: 'networkidle2' });
-        console.log(`[${new Date().toISOString()}] Visited: ${url}`);
-        console.log(`→ UA: ${userAgent}`);
-        console.log(`→ Location: ${location.name}`);
-
-        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-        console.log('→ Scrolled down');
-
-        const selector = 'button';
-        if (await page.$(selector)) {
-            await page.click(selector);
-            console.log(`→ Clicked: ${selector}`);
-        } else {
-            console.log(`→ No clickable button found`);
-        }
-    } catch (error) {
-        console.error(`[${new Date().toISOString()}] Error visiting ${url}:`, error.message);
-    } finally {
-        await browser.close();
-    }
+module.exports = {
+    KEYWORD_CATEGORIES,
+    KEYWORDS,
+    KEYWORD_CONFIG,
+    GEO_LOCATIONS
 };
-
-console.log(`Starting crawler. Visiting ${URLS.length} pages every ${VISIT_INTERVAL_MS / 1000} seconds...`);
-
-setInterval(() => {
-    const url = URLS[currentIndex];
-    visitPage(url);
-    currentIndex = (currentIndex + 1) % URLS.length;
-}, VISIT_INTERVAL_MS);
