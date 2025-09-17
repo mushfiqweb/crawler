@@ -4,6 +4,19 @@
  */
 
 const PERFORMANCE_CONFIG = {
+    // Browser pool configuration
+    browserPool: {
+        maxBrowsers: 3,
+        minBrowsers: 1,
+        browserTimeout: 30000,
+        launchTimeout: 10000,
+        closeTimeout: 5000
+    },
+    
+    // System validator expected properties
+    maxConcurrentBrowsers: 3,
+    requestTimeout: 30000,
+    retryAttempts: 3,
     enableBrowserReuse: true,
     maxConcurrentSearches: 3, // Limit concurrent searches to prevent resource exhaustion
     browserPoolSize: 2, // Number of browser instances to maintain

@@ -148,20 +148,21 @@ class Crawler {
 
         filteredKeywords.forEach(keyword => {
             // Select diverse geolocations
-            const selectedLocations = Helpers.getRandomItems(
+            const selectedLocations = Helpers.getRandomElements(
                 GEO_LOCATIONS, 
                 Math.min(10, GEO_LOCATIONS.length)
             );
 
             selectedLocations.forEach(location => {
                 // Select diverse device configurations
-                const selectedDevices = Helpers.getRandomItems(ALL_DEVICE_CONFIGS, 3);
+                const selectedDevices = Helpers.getRandomElements(ALL_DEVICE_CONFIGS, 3);
 
                 selectedDevices.forEach(deviceConfig => {
                     // Select appropriate platforms
-                    const availablePlatforms = this.platformSelector.selectPlatforms(
-                        deviceConfig,
-                        location.requiresGeolocation || false
+                    const availablePlatforms = this.platformSelector.selectMultiplePlatforms(
+                        keyword,
+                        3,
+                        { deviceConfig, location }
                     );
 
                     availablePlatforms.forEach(platform => {
@@ -188,12 +189,13 @@ class Crawler {
             });
         });
 
-            // Apply organic randomization
-            this.searchCombinations = this.applyOrganicSequencing(combinations);
-            
-            Logger.info(`✅ Generated ${this.searchCombinations.length} search combinations`);
+        // Apply organic randomization
+        this.searchCombinations = this.applyOrganicSequencing(combinations);
+        
+        Logger.info(`✅ Generated ${this.searchCombinations.length} search combinations`);
         } catch (error) {
-            Logger.error('❌ Error generating search combinations:', error);
+            Logger.error('❌ Error generating search combinations:', error.message);
+            Logger.error('❌ Error stack:', error.stack);
             throw error;
         }
     }
@@ -252,10 +254,14 @@ class Crawler {
             Logger.info(`📊 Total search combinations: ${this.searchCombinations.length}`);
 
             // Start the organic search pattern
+            Logger.info('🔄 About to schedule next search...');
             this.scheduleNextSearch();
+            Logger.info('✅ Successfully scheduled next search');
 
         } catch (error) {
-            Logger.error('Failed to start crawler', error);
+            Logger.error('Failed to start crawler');
+            Logger.error(`❌ Error message: ${error.message}`);
+            Logger.error(`❌ Error stack: ${error.stack}`);
             throw error;
         }
     }
@@ -297,7 +303,7 @@ class Crawler {
         // Check for burst mode
         if (!this.burstMode && this.shouldEnterBurstMode()) {
             this.burstMode = true;
-            this.burstRemaining = Helpers.getRandomInRange(
+            this.burstRemaining = Helpers.randomBetween(
                 config.humanPatterns.burstCount.min,
                 config.humanPatterns.burstCount.max
             );
@@ -310,7 +316,7 @@ class Crawler {
                 this.burstMode = false;
                 Logger.info('✅ Burst mode completed');
             }
-            return Helpers.getRandomInRange(
+            return Helpers.randomBetween(
                 config.humanPatterns.burstInterval.min,
                 config.humanPatterns.burstInterval.max
             );
@@ -319,7 +325,7 @@ class Crawler {
         // Check for long pause
         if (config.humanPatterns.enableRandomPauses && 
             Math.random() < config.humanPatterns.pauseProbability) {
-            const pauseTime = Helpers.getRandomInRange(
+            const pauseTime = Helpers.randomBetween(
                 config.humanPatterns.longPauseRange.min,
                 config.humanPatterns.longPauseRange.max
             );
@@ -328,13 +334,13 @@ class Crawler {
         }
 
         // Normal interval with jitter
-        let baseInterval = Helpers.getRandomInRange(
+        let baseInterval = Helpers.randomBetween(
             config.intervalRange.min,
             config.intervalRange.max
         );
 
         if (config.antiDetection.enableJitter) {
-            const jitter = Helpers.getRandomInRange(
+            const jitter = Helpers.randomBetween(
                 config.antiDetection.jitterRange.min,
                 config.antiDetection.jitterRange.max
             );

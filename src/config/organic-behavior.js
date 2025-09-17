@@ -4,6 +4,12 @@
  */
 
 const ORGANIC_BEHAVIOR_CONFIG = {
+    // System validator expected properties
+    minDelay: 2000,
+    maxDelay: 8000,
+    humanPatterns: true,
+    antiDetection: true,
+    
     // Variable interval ranges (in milliseconds)
     intervalRange: {
         min: 3000,    // 3 seconds minimum
