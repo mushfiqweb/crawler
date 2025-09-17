@@ -4,14 +4,16 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon crawler.js"
+    "start": "nodemon src/crawler.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.12.2",
-    "puppeteer": "24.10.2"
+    "puppeteer": "24.10.2",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
