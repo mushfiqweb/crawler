@@ -302,6 +302,15 @@ class StatsTracker {
     }
 
     /**
+     * Record a search (alias for recordKeywordSearch with type safety)
+     */
+    async recordSearch(keyword, platform, success = true, searchTime = 0, errorMessage = null) {
+        // Ensure keyword is a string
+        const keywordStr = typeof keyword === 'string' ? keyword : String(keyword);
+        return await this.recordKeywordSearch(keywordStr, platform, success, searchTime);
+    }
+
+    /**
      * Get current statistics summary
      */
     getStatsSummary() {
