@@ -6,6 +6,7 @@
 const { SEARCH_PLATFORMS } = require('../config/search-platforms');
 const { ORGANIC_BEHAVIOR } = require('../config/organic-behavior');
 const { PERFORMANCE_CONFIG } = require('../config/performance');
+const { createPlatformLog, getPlatformEmoji } = require('../utils/brand-colors');
 
 class SearchEngine {
     constructor(browserPool, statsTracker) {
@@ -37,8 +38,11 @@ class SearchEngine {
         let browser = null;
         let success = false;
 
+        let result = null;
+        let page = null;
+        
         try {
-            console.log(`🔍 Starting search for "${keyword}" on ${platform}`);
+            console.log(createPlatformLog(platform, `Starting search for "${keyword}" on ${platform}`, 'search'));
             
             // Get browser from pool
             browser = await this.browserPool.getBrowser();
@@ -50,23 +54,27 @@ class SearchEngine {
             }
 
             // Create new page
-            const page = await browser.newPage();
+            page = await browser.newPage();
             
-            try {
-                // Configure page
-                await this.configurePage(page, options);
-                
-                // Perform the search
-                const result = await this.executeSearch(page, keyword, platformConfig, options);
-                
-                success = true;
-                this.stats.successfulSearches++;
-                
-                console.log(`✅ Search completed for "${keyword}" on ${platform}`);
-                return result;
-                
-            } finally {
-                // Close page
+            // Configure page
+            await this.configurePage(page, options);
+            
+            // Perform the search
+            result = await this.executeSearch(page, keyword, platformConfig, options);
+            
+            success = true;
+            this.stats.successfulSearches++;
+            
+            console.log(createPlatformLog(platform, `Search completed for "${keyword}" on ${platform}`, 'success'));
+            
+        } catch (error) {
+            console.error(createPlatformLog(platform, `Search failed for "${keyword}" on ${platform}: ${error.message}`, 'error'));
+            this.stats.failedSearches++;
+            throw error;
+            
+        } finally {
+            // Close page (wrapped in try-catch to prevent cleanup errors)
+            if (page) {
                 try {
                     await page.close();
                 } catch (error) {
@@ -74,28 +82,32 @@ class SearchEngine {
                 }
             }
             
-        } catch (error) {
-            console.error(`❌ Search failed for "${keyword}" on ${platform}:`, error.message);
-            this.stats.failedSearches++;
-            throw error;
-            
-        } finally {
             // Calculate search time
             const searchTime = (Date.now() - startTime) / 1000;
             this.stats.totalSearches++;
             this.stats.averageSearchTime = 
                 ((this.stats.averageSearchTime * (this.stats.totalSearches - 1)) + searchTime) / this.stats.totalSearches;
             
-            // Record in stats tracker
-            if (this.statsTracker) {
-                await this.statsTracker.recordKeywordSearch(keyword, platform, success, searchTime);
+            // Record in stats tracker (wrapped in try-catch to prevent cleanup errors)
+            try {
+                if (this.statsTracker) {
+                    await this.statsTracker.recordKeywordSearch(keyword, platform, success, searchTime);
+                }
+            } catch (error) {
+                console.warn('⚠️ Error recording stats:', error.message);
             }
             
-            // Return browser to pool
-            if (browser) {
-                await this.browserPool.releaseBrowser(browser);
+            // Return browser to pool (wrapped in try-catch to prevent cleanup errors)
+            try {
+                if (browser) {
+                    await this.browserPool.releaseBrowser(browser);
+                }
+            } catch (error) {
+                console.warn('⚠️ Error releasing browser:', error.message);
             }
         }
+        
+        return result;
     }
 
     /**
@@ -161,7 +173,7 @@ class SearchEngine {
             const results = await this.extractSearchResults(page, platformConfig);
 
             // Simulate organic browsing behavior
-            await this.simulateOrganicBehavior(page, results);
+            await this.simulateOrganicBehavior(page, results, platformConfig);
 
             return {
                 keyword,
@@ -182,12 +194,29 @@ class SearchEngine {
      * Build search URL for platform
      */
     buildSearchUrl(keyword, platformConfig, options = {}) {
-        let url = platformConfig.searchUrl;
+        // Build URL from baseURL and queryParam
+        const baseUrl = platformConfig.baseURL || platformConfig.searchUrl;
+        const queryParam = platformConfig.queryParam || 'q';
         
-        // Replace keyword placeholder
-        url = url.replace('{keyword}', encodeURIComponent(keyword));
+        if (!baseUrl) {
+            throw new Error(`No baseURL or searchUrl found for platform ${platformConfig.name}`);
+        }
         
-        // Add additional parameters
+        // Start with base URL
+        let url = baseUrl;
+        
+        // Add query parameter
+        const separator = url.includes('?') ? '&' : '?';
+        url += `${separator}${queryParam}=${encodeURIComponent(keyword)}`;
+        
+        // Add additional platform parameters
+        if (platformConfig.additionalParams) {
+            for (const [key, value] of Object.entries(platformConfig.additionalParams)) {
+                url += `&${key}=${encodeURIComponent(value)}`;
+            }
+        }
+        
+        // Add additional parameters from options
         if (options.location) {
             url += `&location=${encodeURIComponent(options.location)}`;
         }
@@ -279,7 +308,7 @@ class SearchEngine {
     /**
      * Simulate organic browsing behavior
      */
-    async simulateOrganicBehavior(page, results) {
+    async simulateOrganicBehavior(page, results, platformConfig) {
         if (!ORGANIC_BEHAVIOR.enableOrganicPatterns || results.length === 0) {
             return;
         }
@@ -305,10 +334,10 @@ class SearchEngine {
             }
 
             // Occasionally click on a result (simulate interest)
-            if (Math.random() < 0.3 && results.length > 0) {
+            if (Math.random() < 0.3 && results.length > 0 && platformConfig.resultSelector) {
                 const randomResult = Math.floor(Math.random() * Math.min(results.length, 3));
                 try {
-                    const resultSelector = `${SEARCH_PLATFORMS[0].resultsSelector}:nth-child(${randomResult + 1}) a`;
+                    const resultSelector = `${platformConfig.resultSelector}:nth-child(${randomResult + 1}) a`;
                     await page.click(resultSelector);
                     await this.organicDelay(2000, 5000);
                     await page.goBack();

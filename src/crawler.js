@@ -371,16 +371,17 @@ class Crawler {
             });
 
             // Perform the search using SearchEngine
-            const result = await this.searchEngine.performSearch(searchData);
-
-            // Record statistics
-            await this.statsTracker.recordSearch(
+            const result = await this.searchEngine.performSearch(
                 searchData.keyword,
                 searchData.platform,
-                true,
-                Date.now() - startTime
+                {
+                    location: searchData.location,
+                    deviceConfig: searchData.deviceConfig,
+                    platformConfig: searchData.platformConfig
+                }
             );
 
+            // Update local stats (detailed stats are recorded by search engine)
             this.stats.totalSearches++;
             this.stats.successfulSearches++;
 
@@ -391,20 +392,12 @@ class Crawler {
             });
 
             // Trigger memory management
-            this.memoryManager.checkMemory();
+            this.memoryManager.recordMemoryUsage();
 
             return result;
 
         } catch (error) {
-            // Record failed search
-            await this.statsTracker.recordSearch(
-                searchData.keyword,
-                searchData.platform,
-                false,
-                Date.now() - startTime,
-                error.message
-            );
-
+            // Update local stats (detailed stats are recorded by search engine)
             this.stats.totalSearches++;
             this.stats.failedSearches++;
 
