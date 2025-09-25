@@ -389,3 +389,34 @@ This project is proprietary software designed for specific brand visibility enha
 ---
 
 **Note**: This crawler is designed to enhance brand visibility through automated search simulation. Regular monitoring and updates are recommended to maintain effectiveness and compliance with platform policies. For maximum impact, combine with genuine SEO strategies and authentic content marketing efforts.
+
+
+
+### Sample .ENV
+
+```
+
+WEBSHARE_USERNAME=vzgusscn dummy user name
+WEBSHARE_PASSWORD=9pezxygyyxk7 dummy passowrd 
+
+WEBSHARE_PROXY_001=142.111.48.253:7030
+WEBSHARE_PROXY_002=198.23.239.134:6540
+WEBSHARE_PROXY_003=45.38.107.97:6014
+WEBSHARE_PROXY_004=107.172.163.27:6543
+WEBSHARE_PROXY_005=64.137.96.74:6641
+WEBSHARE_PROXY_006=154.203.43.247:5536
+WEBSHARE_PROXY_007=84.247.60.125:6095
+WEBSHARE_PROXY_008=216.10.27.159:6837
+WEBSHARE_PROXY_009=142.111.67.146:5611
+WEBSHARE_PROXY_010=142.147.128.93:6593
+
+WEBSHARE_ROTATION_STRATEGY=round_robin
+WEBSHARE_MAX_RETRIES=3
+WEBSHARE_TIMEOUT_MS=30000
+WEBSHARE_HEALTH_CHECK_INTERVAL=300000
+WEBSHARE_FAILURE_THRESHOLD=5
+WEBSHARE_RECOVERY_TIME=600000
+WEBSHARE_ENABLE_IP_WHITELISTING=false
+WEBSHARE_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
+
+```

@@ -30,7 +30,7 @@ const SEARCH_PLATFORMS = [
         resultSelector: '[data-testid="search_result"], .x1yztbdb',
         waitForSelector: '[data-pagelet="SearchResults"], .search',
         priority: 0.7,
-        enabled: true,
+        enabled: false,
         supportsMobile: true,
         supportsGeolocation: false,
         additionalParams: {
@@ -46,7 +46,7 @@ const SEARCH_PLATFORMS = [
         resultSelector: '[data-testid="tweet"], .tweet',
         waitForSelector: '[data-testid="primaryColumn"], .timeline',
         priority: 0.6,
-        enabled: true,
+        enabled: false,
         supportsMobile: true,
         supportsGeolocation: false,
         additionalParams: {
@@ -64,6 +64,15 @@ const PLATFORM_CONFIG = {
     mobileCompatibilityRequired: false,
     geolocationSupportRequired: false,
 
+    // Global platform control
+    globalPlatformControl: {
+        enableAll: false,
+        disableAll: false,
+        enabledPlatforms: ['Google'], // Platforms to enable when enableAll is false
+        disabledPlatforms: ['Facebook', 'X/Twitter'], // Platforms to disable when disableAll is false
+        respectIndividualSettings: true // Whether to respect individual platform enabled flags
+    },
+
     // Platform-specific timeouts (in milliseconds)
     timeouts: {
         'Google': 15000,
@@ -79,7 +88,155 @@ const PLATFORM_CONFIG = {
     }
 };
 
+/**
+ * Platform Management Utilities
+ */
+const PlatformManager = {
+    /**
+     * Get all enabled platforms based on configuration
+     * @returns {Array} Array of enabled platform configurations
+     */
+    getEnabledPlatforms() {
+        const { globalPlatformControl } = PLATFORM_CONFIG;
+        
+        // If disableAll is true, return empty array
+        if (globalPlatformControl.disableAll) {
+            return [];
+        }
+        
+        // If enableAll is false, use specific enabled platforms list
+        if (!globalPlatformControl.enableAll) {
+            return SEARCH_PLATFORMS.filter(platform => 
+                globalPlatformControl.enabledPlatforms.includes(platform.name) &&
+                (globalPlatformControl.respectIndividualSettings ? platform.enabled : true)
+            );
+        }
+        
+        // Default: return platforms based on individual enabled flags and disabled list
+        return SEARCH_PLATFORMS.filter(platform => {
+            const isIndividuallyDisabled = globalPlatformControl.disabledPlatforms.includes(platform.name);
+            const isIndividuallyEnabled = globalPlatformControl.respectIndividualSettings ? platform.enabled : true;
+            
+            return !isIndividuallyDisabled && isIndividuallyEnabled;
+        });
+    },
+
+    /**
+     * Check if a specific platform is enabled
+     * @param {string} platformName - Name of the platform to check
+     * @returns {boolean} True if platform is enabled
+     */
+    isPlatformEnabled(platformName) {
+        const enabledPlatforms = this.getEnabledPlatforms();
+        return enabledPlatforms.some(platform => platform.name.toLowerCase() === platformName.toLowerCase());
+    },
+
+    /**
+     * Enable a specific platform
+     * @param {string} platformName - Name of the platform to enable
+     */
+    enablePlatform(platformName) {
+        const { globalPlatformControl } = PLATFORM_CONFIG;
+        
+        // Remove from disabled list if present
+        const disabledIndex = globalPlatformControl.disabledPlatforms.indexOf(platformName);
+        if (disabledIndex > -1) {
+            globalPlatformControl.disabledPlatforms.splice(disabledIndex, 1);
+        }
+        
+        // Add to enabled list if not using enableAll
+        if (!globalPlatformControl.enableAll && !globalPlatformControl.enabledPlatforms.includes(platformName)) {
+            globalPlatformControl.enabledPlatforms.push(platformName);
+        }
+        
+        // Update individual platform setting if respecting individual settings
+        if (globalPlatformControl.respectIndividualSettings) {
+            const platform = SEARCH_PLATFORMS.find(p => p.name === platformName);
+            if (platform) {
+                platform.enabled = true;
+            }
+        }
+    },
+
+    /**
+     * Disable a specific platform
+     * @param {string} platformName - Name of the platform to disable
+     */
+    disablePlatform(platformName) {
+        const { globalPlatformControl } = PLATFORM_CONFIG;
+        
+        // Add to disabled list if not present
+        if (!globalPlatformControl.disabledPlatforms.includes(platformName)) {
+            globalPlatformControl.disabledPlatforms.push(platformName);
+        }
+        
+        // Remove from enabled list
+        const enabledIndex = globalPlatformControl.enabledPlatforms.indexOf(platformName);
+        if (enabledIndex > -1) {
+            globalPlatformControl.enabledPlatforms.splice(enabledIndex, 1);
+        }
+        
+        // Update individual platform setting if respecting individual settings
+        if (globalPlatformControl.respectIndividualSettings) {
+            const platform = SEARCH_PLATFORMS.find(p => p.name === platformName);
+            if (platform) {
+                platform.enabled = false;
+            }
+        }
+    },
+
+    /**
+     * Enable all platforms
+     */
+    enableAllPlatforms() {
+        PLATFORM_CONFIG.globalPlatformControl.enableAll = true;
+        PLATFORM_CONFIG.globalPlatformControl.disableAll = false;
+        PLATFORM_CONFIG.globalPlatformControl.disabledPlatforms = [];
+        
+        // Enable all individual platforms if respecting individual settings
+        if (PLATFORM_CONFIG.globalPlatformControl.respectIndividualSettings) {
+            SEARCH_PLATFORMS.forEach(platform => {
+                platform.enabled = true;
+            });
+        }
+    },
+
+    /**
+     * Disable all platforms
+     */
+    disableAllPlatforms() {
+        PLATFORM_CONFIG.globalPlatformControl.disableAll = true;
+        PLATFORM_CONFIG.globalPlatformControl.enableAll = false;
+        
+        // Disable all individual platforms if respecting individual settings
+        if (PLATFORM_CONFIG.globalPlatformControl.respectIndividualSettings) {
+            SEARCH_PLATFORMS.forEach(platform => {
+                platform.enabled = false;
+            });
+        }
+    },
+
+    /**
+     * Get platform status summary
+     * @returns {Object} Summary of platform statuses
+     */
+    getPlatformStatus() {
+        const enabledPlatforms = this.getEnabledPlatforms();
+        const allPlatforms = SEARCH_PLATFORMS;
+        
+        return {
+            totalPlatforms: allPlatforms.length,
+            enabledCount: enabledPlatforms.length,
+            disabledCount: allPlatforms.length - enabledPlatforms.length,
+            enabledPlatforms: enabledPlatforms.map(p => p.name),
+            disabledPlatforms: allPlatforms.filter(p => !enabledPlatforms.includes(p)).map(p => p.name),
+            globalSettings: PLATFORM_CONFIG.globalPlatformControl
+        };
+    }
+};
+
 module.exports = {
     SEARCH_PLATFORMS,
-    PLATFORM_CONFIG
+    PLATFORM_CONFIG,
+    PlatformManager
 };

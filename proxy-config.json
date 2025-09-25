@@ -1,0 +1,237 @@
+{
+  "_comment": "Bangladesh Proxy Configuration File",
+  "_instructions": [
+    "1. Choose a proxy provider from the 'providers' section",
+    "2. Set 'enabled: true' for your chosen provider",
+    "3. Replace placeholder credentials with your actual account details",
+    "4. Configure targeting options (city, carrier, etc.)",
+    "5. Test your configuration with: node test-bangladesh-proxy.js"
+  ],
+  
+  "settings": {
+    "country": "BD",
+    "rotation_strategy": "per_request",
+    "session_duration_minutes": 10,
+    "max_retries": 3,
+    "request_timeout_seconds": 30,
+    "enable_health_monitoring": true,
+    "debug_mode": false
+  },
+
+  "targeting": {
+    "cities": {
+      "enabled": true,
+      "preferences": ["dhaka", "chittagong", "sylhet", "rajshahi", "khulna"],
+      "weights": {
+        "dhaka": 0.5,
+        "chittagong": 0.25,
+        "sylhet": 0.15,
+        "rajshahi": 0.05,
+        "khulna": 0.05
+      }
+    },
+    "carriers": {
+      "enabled": false,
+      "preferences": ["grameenphone", "robi", "banglalink", "teletalk"],
+      "weights": {
+        "grameenphone": 0.45,
+        "robi": 0.30,
+        "banglalink": 0.20,
+        "teletalk": 0.05
+      }
+    },
+    "connection_types": {
+      "residential": 0.70,
+      "mobile": 0.20,
+      "datacenter": 0.10
+    }
+  },
+
+  "providers": {
+    "bright_data": {
+      "enabled": false,
+      "name": "Bright Data (Luminati)",
+      "type": "residential",
+      "priority": 1,
+      "credentials": {
+        "username": "YOUR_BRIGHT_DATA_USERNAME",
+        "password": "YOUR_BRIGHT_DATA_PASSWORD",
+        "zone": "YOUR_ZONE_NAME"
+      },
+      "endpoints": {
+        "residential": {
+          "host": "zproxy.lum-superproxy.io",
+          "port": 22225
+        },
+        "mobile": {
+          "host": "mobile-proxy.lum-superproxy.io",
+          "port": 22000
+        }
+      },
+      "features": {
+        "city_targeting": true,
+        "carrier_targeting": true,
+        "asn_targeting": true,
+        "session_control": true
+      },
+      "limits": {
+        "concurrent_sessions": 100,
+        "requests_per_minute": 1000
+      }
+    },
+
+    "oxylabs": {
+      "enabled": false,
+      "name": "Oxylabs",
+      "type": "residential",
+      "priority": 2,
+      "credentials": {
+        "username": "YOUR_OXYLABS_USERNAME",
+        "password": "YOUR_OXYLABS_PASSWORD"
+      },
+      "endpoints": {
+        "residential": {
+          "host": "pr.oxylabs.io",
+          "port": 7777
+        },
+        "datacenter": {
+          "host": "dc.oxylabs.io",
+          "port": 8001
+        }
+      },
+      "features": {
+        "city_targeting": true,
+        "carrier_targeting": false,
+        "asn_targeting": false,
+        "session_control": true
+      },
+      "limits": {
+        "concurrent_sessions": 50,
+        "requests_per_minute": 500
+      }
+    },
+
+    "smartproxy": {
+      "enabled": false,
+      "name": "Smartproxy",
+      "type": "residential",
+      "priority": 3,
+      "credentials": {
+        "username": "YOUR_SMARTPROXY_USERNAME",
+        "password": "YOUR_SMARTPROXY_PASSWORD"
+      },
+      "endpoints": {
+        "residential": {
+          "host": "gate.smartproxy.com",
+          "port": 10000
+        }
+      },
+      "features": {
+        "city_targeting": true,
+        "carrier_targeting": false,
+        "asn_targeting": false,
+        "session_control": true
+      },
+      "limits": {
+        "concurrent_sessions": 25,
+        "requests_per_minute": 200
+      }
+    },
+
+    "iproyal": {
+      "enabled": false,
+      "name": "IPRoyal",
+      "type": "residential",
+      "priority": 4,
+      "credentials": {
+        "username": "YOUR_IPROYAL_USERNAME",
+        "password": "YOUR_IPROYAL_PASSWORD"
+      },
+      "endpoints": {
+        "residential": {
+          "host": "residential.iproyal.com",
+          "port": 12321
+        },
+        "datacenter": {
+          "host": "datacenter.iproyal.com",
+          "port": 12323
+        }
+      },
+      "features": {
+        "city_targeting": false,
+        "carrier_targeting": false,
+        "asn_targeting": false,
+        "session_control": true
+      },
+      "limits": {
+        "concurrent_sessions": 20,
+        "requests_per_minute": 100
+      }
+    }
+  },
+
+  "fallback": {
+    "enabled": true,
+    "strategy": "round_robin",
+    "retry_failed_providers": true,
+    "retry_delay_seconds": 60
+  },
+
+  "monitoring": {
+    "health_check_interval_minutes": 5,
+    "success_rate_threshold": 0.8,
+    "response_time_threshold_ms": 5000,
+    "log_level": "info",
+    "metrics": {
+      "track_success_rate": true,
+      "track_response_time": true,
+      "track_geographic_distribution": true,
+      "track_provider_performance": true
+    }
+  },
+
+  "security": {
+    "user_agents": {
+      "rotate": true,
+      "pool": [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      ]
+    },
+    "headers": {
+      "accept_language": "bn-BD,bn;q=0.9,en;q=0.8",
+      "accept_encoding": "gzip, deflate, br",
+      "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+    },
+    "delays": {
+      "min_request_delay_ms": 1000,
+      "max_request_delay_ms": 5000,
+      "human_like_delays": true
+    }
+  },
+
+  "google_search": {
+    "domains": ["google.com.bd", "google.com"],
+    "parameters": {
+      "gl": "BD",
+      "hl": "bn",
+      "cr": "countryBD"
+    },
+    "rate_limiting": {
+      "requests_per_minute": 10,
+      "requests_per_hour": 100,
+      "requests_per_day": 1000
+    }
+  },
+
+  "validation": {
+    "test_urls": [
+      "https://ipapi.co/json/",
+      "https://httpbin.org/ip",
+      "https://api.ipify.org?format=json"
+    ],
+    "expected_country_codes": ["BD", "Bangladesh"],
+    "timeout_seconds": 10
+  }
+}

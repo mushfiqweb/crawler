@@ -3,7 +3,7 @@
  * Intelligent platform selection based on keyword types, performance metrics, and availability
  */
 
-const { SEARCH_PLATFORMS } = require('../config/search-platforms');
+const { SEARCH_PLATFORMS, PlatformManager } = require('../config/search-platforms');
 const { KEYWORD_CATEGORIES } = require('../config/keywords');
 const { Helpers } = require('./helpers');
 
@@ -44,6 +44,8 @@ class PlatformSelector {
         let availablePlatforms = this.platforms.filter(platform => {
             if (excludePlatforms.includes(platform.name)) return false;
             if (requireAvailable && !this.platformAvailability.get(platform.name)) return false;
+            // Check if platform is enabled via PlatformManager
+            if (!PlatformManager.isPlatformEnabled(platform.name)) return false;
             return true;
         });
 

@@ -158,10 +158,15 @@ class Crawler {
                 const selectedDevices = Helpers.getRandomElements(ALL_DEVICE_CONFIGS, 3);
 
                 selectedDevices.forEach(deviceConfig => {
+                    // Get the number of enabled platforms to avoid requesting more than available
+                    const { PlatformManager } = require('./config/search-platforms');
+                    const enabledPlatformsCount = PlatformManager.getEnabledPlatforms().length;
+                    const platformsToRequest = Math.min(3, enabledPlatformsCount);
+                    
                     // Select appropriate platforms
                     const availablePlatforms = this.platformSelector.selectMultiplePlatforms(
                         keyword,
-                        3,
+                        platformsToRequest,
                         { deviceConfig, location }
                     );
 

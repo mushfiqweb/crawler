@@ -7,6 +7,7 @@ const puppeteer = require('puppeteer');
 const { ORGANIC_BEHAVIOR } = require('../config/organic-behavior');
 const { PERFORMANCE_CONFIG } = require('../config/performance');
 const { DEVICE_CONFIGURATIONS_STRUCTURED: DEVICE_CONFIGURATIONS } = require('../config/device-configurations');
+const ProxyManager = require('./proxy-manager');
 
 class BrowserPool {
     constructor(maxBrowsers = PERFORMANCE_CONFIG.browserPoolSize) {
@@ -16,11 +17,14 @@ class BrowserPool {
         this.busyBrowsers = [];
         this.browserCreationQueue = [];
         this.isShuttingDown = false;
+        this.sessionRegistry = new Map(); // Track isolated sessions
+        this.proxyManager = new ProxyManager(); // Initialize proxy manager
         this.stats = {
             created: 0,
             destroyed: 0,
             reused: 0,
-            errors: 0
+            errors: 0,
+            isolatedSessions: 0
         };
     }
 
@@ -86,6 +90,159 @@ class BrowserPool {
             console.error('❌ Failed to create browser:', error.message);
             throw error;
         }
+    }
+
+    /**
+     * Create a browser instance with proxy configuration for Google searches (uses Webshare proxies)
+     */
+    async createProxyBrowser() {
+        try {
+            // Get proxy configuration (now uses Webshare proxies only)
+            const proxyConfig = await this.proxyManager.getProxyConfigForPuppeteer();
+            
+            if (!proxyConfig) {
+                // No proxy configured, create direct connection browser
+                return await this.createDirectBrowser();
+            }
+            
+            const browser = await puppeteer.launch({
+                headless: PERFORMANCE_CONFIG.headless,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-gpu',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
+                    '--disable-features=TranslateUI',
+                    '--disable-ipc-flooding-protection',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                    '--memory-pressure-off',
+                    '--max_old_space_size=4096',
+                    // Add proxy configuration
+                    `--proxy-server=${proxyConfig.server}`
+                ],
+                defaultViewport: null,
+                ignoreDefaultArgs: ['--enable-automation'],
+                ignoreHTTPSErrors: true
+            });
+
+            // Add browser metadata including proxy info
+            browser._poolId = Date.now() + Math.random();
+            browser._createdAt = Date.now();
+            browser._usageCount = 0;
+            browser._lastUsed = Date.now();
+            browser._proxyConfig = proxyConfig;
+            browser._webshareProxy = true;
+
+            // Configure proxy authentication for Webshare proxies
+            if (proxyConfig.username && proxyConfig.password) {
+                const pages = await browser.pages();
+                if (pages.length > 0) {
+                    await pages[0].authenticate({
+                        username: proxyConfig.username,
+                        password: proxyConfig.password
+                    });
+                }
+            }
+
+            this.browsers.push(browser);
+            this.availableBrowsers.push(browser);
+            this.stats.created++;
+
+            console.log(`🌐 Created Webshare proxy browser ${browser._poolId} via ${proxyConfig.server}`);
+            return browser;
+        } catch (error) {
+            this.stats.errors++;
+            console.error('❌ Failed to create proxy browser:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Create a direct connection browser (no proxy)
+     */
+    async createDirectBrowser() {
+        try {
+            const browser = await puppeteer.launch({
+                headless: PERFORMANCE_CONFIG.headless,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-gpu',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
+                    '--disable-features=TranslateUI',
+                    '--disable-ipc-flooding-protection',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                    '--memory-pressure-off',
+                    '--max_old_space_size=4096'
+                ],
+                defaultViewport: null,
+                ignoreDefaultArgs: ['--enable-automation'],
+                ignoreHTTPSErrors: true
+            });
+
+            // Add browser metadata
+            browser._poolId = Date.now() + Math.random();
+            browser._createdAt = Date.now();
+            browser._usageCount = 0;
+            browser._lastUsed = Date.now();
+            browser._directConnection = true;
+
+            this.browsers.push(browser);
+            this.availableBrowsers.push(browser);
+            this.stats.created++;
+
+            console.log(`🔗 Created direct connection browser ${browser._poolId}`);
+            return browser;
+        } catch (error) {
+            this.stats.errors++;
+            console.error('❌ Failed to create direct browser:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Backward compatibility alias
+     */
+    async createBangladeshProxyBrowser() {
+        return await this.createProxyBrowser();
+    }
+
+    /**
+     * Get a browser specifically configured for Google searches with proxy
+     */
+    async getBangladeshBrowserForGoogle() {
+        if (this.isShuttingDown) {
+            throw new Error('Browser pool is shutting down');
+        }
+
+        // Always create a new browser with unique proxy for Google searches
+        const browser = await this.createProxyBrowser();
+        this.availableBrowsers.pop(); // Remove from available
+        this.busyBrowsers.push(browser); // Add to busy
+        browser._usageCount++;
+        browser._lastUsed = Date.now();
+
+        // Track Google search usage if proxy is configured
+        if (browser._proxyConfig && browser._proxyConfig.proxy) {
+            await this.proxyManager.trackGoogleSearchUsage(browser._proxyConfig.proxy);
+        }
+
+        console.log(`🔍 Allocated proxy browser ${browser._poolId} for Google search`);
+        return browser;
     }
 
     /**
@@ -354,6 +511,124 @@ class BrowserPool {
             healthy: issues.length === 0,
             issues,
             stats
+        };
+    }
+
+    /**
+     * Create isolated browser session with unique fingerprint
+     */
+    async createIsolatedSession(sessionId, fingerprint = null) {
+        try {
+            const sessionFingerprint = fingerprint || this.generateDefaultFingerprint();
+            
+            const browser = await puppeteer.launch({
+                headless: PERFORMANCE_CONFIG.headless,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-gpu',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                    `--user-agent=${sessionFingerprint.userAgent}`,
+                    `--window-size=${sessionFingerprint.viewport.width},${sessionFingerprint.viewport.height}`
+                ],
+                defaultViewport: sessionFingerprint.viewport,
+                ignoreHTTPSErrors: true
+            });
+
+            // Register session
+            this.sessionRegistry.set(sessionId, {
+                browser,
+                fingerprint: sessionFingerprint,
+                createdAt: Date.now(),
+                status: 'active'
+            });
+
+            this.stats.isolatedSessions++;
+            console.log(`🔒 Created isolated session [${sessionId}] with unique fingerprint`);
+
+            return browser;
+
+        } catch (error) {
+            console.error(`❌ Failed to create isolated session [${sessionId}]:`, error);
+            this.stats.errors++;
+            throw error;
+        }
+    }
+
+    /**
+     * Get isolated session browser
+     */
+    getIsolatedSession(sessionId) {
+        const session = this.sessionRegistry.get(sessionId);
+        return session ? session.browser : null;
+    }
+
+    /**
+     * Close isolated session
+     */
+    async closeIsolatedSession(sessionId) {
+        const session = this.sessionRegistry.get(sessionId);
+        
+        if (session) {
+            try {
+                await session.browser.close();
+                session.status = 'closed';
+                session.closedAt = Date.now();
+                
+                console.log(`🔒 Closed isolated session [${sessionId}]`);
+                
+                // Remove from registry after a delay for potential debugging
+                setTimeout(() => {
+                    this.sessionRegistry.delete(sessionId);
+                }, 60000); // Keep for 1 minute
+
+            } catch (error) {
+                console.error(`❌ Error closing isolated session [${sessionId}]:`, error);
+                this.stats.errors++;
+            }
+        }
+    }
+
+    /**
+     * Generate default fingerprint for isolated sessions
+     */
+    generateDefaultFingerprint() {
+        const userAgents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        ];
+
+        const viewports = [
+            { width: 1920, height: 1080, deviceScaleFactor: 1, isMobile: false, hasTouch: false, isLandscape: true },
+            { width: 1366, height: 768, deviceScaleFactor: 1, isMobile: false, hasTouch: false, isLandscape: true },
+            { width: 1440, height: 900, deviceScaleFactor: 1, isMobile: false, hasTouch: false, isLandscape: true },
+            { width: 1536, height: 864, deviceScaleFactor: 1, isMobile: false, hasTouch: false, isLandscape: true }
+        ];
+
+        return {
+            userAgent: userAgents[Math.floor(Math.random() * userAgents.length)],
+            viewport: viewports[Math.floor(Math.random() * viewports.length)]
+        };
+    }
+
+    /**
+     * Get session registry statistics
+     */
+    getSessionStats() {
+        const activeSessions = Array.from(this.sessionRegistry.values())
+            .filter(session => session.status === 'active').length;
+        
+        return {
+            totalSessions: this.sessionRegistry.size,
+            activeSessions,
+            isolatedSessionsCreated: this.stats.isolatedSessions
         };
     }
 }
