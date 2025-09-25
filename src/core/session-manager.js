@@ -251,7 +251,7 @@ class SessionManager {
     async assignSessionResources(session) {
         try {
             // Assign proxy
-            session.proxy = this.proxyManager.getNextProxy(session.deviceType, session.targetCountry);
+            session.proxy = await this.proxyManager.getNextProxy(session.deviceType, session.targetCountry);
             
             // Generate fingerprint
             session.fingerprint = this.fingerprintRandomizer.generateFingerprint(session.deviceType, session.targetCountry);
@@ -377,7 +377,7 @@ class SessionManager {
      */
     async rotateSessionProxy(session) {
         try {
-            const newProxy = this.proxyManager.getNextProxy(session.deviceType, session.targetCountry);
+            const newProxy = await this.proxyManager.getNextProxy(session.deviceType, session.targetCountry);
             session.proxy = newProxy;
             Logger.info(`🔄 Rotated proxy for session ${session.id}`);
         } catch (error) {

@@ -1,0 +1,51 @@
+{
+  "timestamp": "2025-09-25T04:54:33.499Z",
+  "testSuite": "KMS Search Protocol",
+  "summary": {
+    "totalTests": 4,
+    "passedTests": 0,
+    "failedTests": 4,
+    "successRate": "0.0%"
+  },
+  "testDetails": [
+    {
+      "scenario": "Direct KMS Marketplace Search",
+      "status": "FAILED",
+      "duration": 2,
+      "error": "Cannot read properties of undefined (reading 'host')",
+      "sessionId": "kms-search-1758776053434-4naq46pi4"
+    },
+    {
+      "scenario": "Product Category Search",
+      "status": "FAILED",
+      "duration": 0,
+      "error": "Cannot read properties of undefined (reading 'host')",
+      "sessionId": "kms-search-1758776058446-ddauq27fh"
+    },
+    {
+      "scenario": "Generic Business Search",
+      "status": "FAILED",
+      "duration": 0,
+      "error": "Cannot read properties of undefined (reading 'host')",
+      "sessionId": "kms-search-1758776063464-1onir12tv"
+    },
+    {
+      "scenario": "Specific Product Search",
+      "status": "FAILED",
+      "duration": 1,
+      "error": "Cannot read properties of undefined (reading 'host')",
+      "sessionId": "kms-search-1758776068481-ydc1klvef"
+    }
+  ],
+  "protocolAnalytics": {
+    "protocolStats": {
+      "totalSearches": 0,
+      "directHits": 0,
+      "fallbackNavigations": 0,
+      "averageEngagementTime": 0
+    },
+    "activeSessions": 0,
+    "totalEngagements": 0,
+    "averageEngagementTime": 0
+  }
+}

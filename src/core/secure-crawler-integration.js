@@ -202,11 +202,11 @@ class SecureCrawlerIntegration {
             ...originalParams,
             
             // Proxy configuration
-            proxy: {
-                server: session.proxy.host + ':' + session.proxy.port,
+            proxy: session.proxy ? {
+                server: session.proxy.server || (session.proxy.host + ':' + session.proxy.port),
                 username: session.proxy.username,
                 password: session.proxy.password
-            },
+            } : null,
             
             // Browser fingerprint
             userAgent: session.fingerprint.userAgent,

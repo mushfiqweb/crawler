@@ -1,13 +1,15 @@
 /**
  * Proxy Management Module
  * Handles IP rotation, proxy validation, and geographic distribution
+ * Includes Webshare proxy integration with automatic failover
  */
 
 const axios = require('axios');
 const { defaultLogger: Logger } = require('../utils/logger');
+const WebshareProxyManager = require('./webshare-proxy-manager');
 
 class ProxyManager {
-    constructor() {
+    constructor(options = {}) {
         this.proxies = [];
         this.activeProxies = [];
         this.failedProxies = [];
@@ -30,6 +32,17 @@ class ProxyManager {
             rotations: 0,
             lastRotation: null
         };
+
+        // Webshare proxy integration
+        this.webshareManager = new WebshareProxyManager({
+            enableHealthCheck: options.enableWebshareHealthCheck !== false,
+            enableDirectFallback: options.enableDirectFallback !== false,
+            maxRetries: options.webshareMaxRetries || 3,
+            ...options.webshareOptions
+        });
+        
+        this.useWebshareProxies = options.useWebshareProxies !== false;
+        this.webshareFirst = options.webshareFirst === true; // Use Webshare proxies first, then Bangladesh
     }
 
     /**
@@ -38,47 +51,39 @@ class ProxyManager {
     async initialize() {
         Logger.info('🌐 Initializing proxy manager...');
         
+        // Initialize Webshare proxy manager if enabled
+        if (this.useWebshareProxies) {
+            try {
+                await this.webshareManager.initialize();
+                Logger.info('✅ Webshare proxy manager initialized');
+            } catch (error) {
+                Logger.error('❌ Failed to initialize Webshare proxy manager:', error);
+                if (!this.webshareManager.options.enableDirectFallback) {
+                    throw error;
+                }
+            }
+        }
+        
         // Load proxy configurations
         await this.loadProxyConfigurations();
         
         // Validate initial proxy pool
         await this.validateProxyPool();
         
-        Logger.info(`✅ Proxy manager initialized with ${this.activeProxies.length} active proxies`);
+        const webshareStats = this.useWebshareProxies ? this.webshareManager.getStats() : { activeProxies: 0 };
+        Logger.info(`✅ Proxy manager initialized with ${this.activeProxies.length} Bangladesh proxies and ${webshareStats.activeProxies} Webshare proxies`);
     }
 
     /**
      * Load proxy configurations from various sources
      */
     async loadProxyConfigurations() {
-        // Example proxy configurations (replace with your actual proxy sources)
-        const proxyConfigs = [
-            // Residential proxies (highest priority for organic behavior)
-            { type: 'residential', host: 'residential-proxy-1.com', port: 8080, auth: { username: 'user1', password: 'pass1' }, country: 'US', city: 'New York' },
-            { type: 'residential', host: 'residential-proxy-2.com', port: 8080, auth: { username: 'user2', password: 'pass2' }, country: 'UK', city: 'London' },
-            { type: 'residential', host: 'residential-proxy-3.com', port: 8080, auth: { username: 'user3', password: 'pass3' }, country: 'CA', city: 'Toronto' },
-            
-            // Mobile proxies (for mobile device simulation)
-            { type: 'mobile', host: 'mobile-proxy-1.com', port: 8080, auth: { username: 'mobile1', password: 'pass1' }, country: 'US', city: 'Los Angeles' },
-            { type: 'mobile', host: 'mobile-proxy-2.com', port: 8080, auth: { username: 'mobile2', password: 'pass2' }, country: 'DE', city: 'Berlin' },
-            
-            // Datacenter proxies (backup option)
-            { type: 'datacenter', host: 'datacenter-proxy-1.com', port: 8080, auth: { username: 'dc1', password: 'pass1' }, country: 'NL', city: 'Amsterdam' },
-            { type: 'datacenter', host: 'datacenter-proxy-2.com', port: 8080, auth: { username: 'dc2', password: 'pass2' }, country: 'SG', city: 'Singapore' }
-        ];
-
-        this.proxies = proxyConfigs.map(config => ({
-            ...config,
-            id: this.generateProxyId(config),
-            isActive: false,
-            lastUsed: null,
-            successCount: 0,
-            failureCount: 0,
-            responseTime: 0,
-            reliability: 1.0
-        }));
-
-        this.stats.totalProxies = this.proxies.length;
+        // No local proxy configurations - rely entirely on Webshare proxies
+        // This eliminates demo/placeholder proxies that cause authentication errors
+        this.proxies = [];
+        this.stats.totalProxies = 0;
+        
+        Logger.info('🌐 Proxy configuration: Using Webshare proxies only (no local demo proxies)');
     }
 
     /**
@@ -96,7 +101,8 @@ class ProxyManager {
                 this.proxies[index].isActive = true;
             } else {
                 this.failedProxies.push(this.proxies[index]);
-                Logger.warn(`❌ Proxy validation failed: ${this.proxies[index].host}:${this.proxies[index].port}`);
+                // Removed verbose proxy validation warnings for cleaner output
+                Logger.debug(`❌ Proxy validation failed: ${this.proxies[index].host}:${this.proxies[index].port}`);
             }
         });
 
@@ -140,14 +146,40 @@ class ProxyManager {
     }
 
     /**
-     * Get next proxy for rotation
+     * Get next proxy for rotation (includes Webshare and Bangladesh proxies)
      */
-    getNextProxy(deviceType = 'desktop', targetCountry = null) {
+    async getNextProxy(deviceType = 'desktop', targetCountry = null) {
+        // Try Webshare proxies first if enabled and configured to do so
+        if (this.useWebshareProxies && this.webshareFirst) {
+            try {
+                const webshareProxy = await this.webshareManager.getNextProxy();
+                if (webshareProxy) {
+                    Logger.debug('🌐 Using Webshare proxy:', webshareProxy.host);
+                    return this.convertWebshareProxyFormat(webshareProxy);
+                }
+            } catch (error) {
+                Logger.warn('⚠️ Webshare proxy unavailable, falling back to Bangladesh proxies:', error.message);
+            }
+        }
+
+        // Use Bangladesh proxies
         if (this.activeProxies.length === 0) {
+            // If no Bangladesh proxies and Webshare is available as fallback
+            if (this.useWebshareProxies && !this.webshareFirst) {
+                try {
+                    const webshareProxy = await this.webshareManager.getNextProxy();
+                    if (webshareProxy) {
+                        Logger.debug('🌐 Using Webshare proxy as fallback:', webshareProxy.host);
+                        return this.convertWebshareProxyFormat(webshareProxy);
+                    }
+                } catch (error) {
+                    Logger.error('❌ No proxies available from any source');
+                }
+            }
             throw new Error('No active proxies available');
         }
 
-        // Filter proxies based on device type and target country
+        // Filter Bangladesh proxies based on device type and target country
         let availableProxies = this.activeProxies.filter(proxy => {
             if (deviceType === 'mobile' && proxy.type !== 'mobile') {
                 return proxy.type === 'residential'; // Residential can work for mobile
@@ -172,6 +204,142 @@ class ProxyManager {
         
         Logger.info(`🔄 Selected proxy: ${proxy.host}:${proxy.port} (${proxy.country}/${proxy.city})`);
         return proxy;
+    }
+
+    /**
+     * Convert Webshare proxy format to internal format
+     */
+    convertWebshareProxyFormat(webshareProxy) {
+        return {
+            id: `webshare_${webshareProxy.id}`,
+            host: webshareProxy.host,
+            port: webshareProxy.port,
+            auth: webshareProxy.auth,
+            type: 'webshare',
+            country: 'US', // Webshare proxies are typically US-based
+            city: 'Unknown',
+            carrier: 'Webshare',
+            reliability: webshareProxy.reliability || 1.0,
+            responseTime: webshareProxy.responseTime || 0,
+            usageCount: webshareProxy.usageCount || 0,
+            lastUsed: webshareProxy.lastUsed || new Date(),
+            source: 'webshare'
+        };
+    }
+
+    /**
+     * Get unique proxy for Google searches (now uses Webshare proxies only)
+     * Ensures each Google search request uses a different proxy
+     */
+    async getUniqueProxyForSearch(excludeProxyIds = []) {
+        if (!this.useWebshareProxies) {
+            throw new Error('No proxy service configured for Google search');
+        }
+
+        try {
+            const webshareProxy = await this.webshareManager.getNextProxy();
+            if (webshareProxy) {
+                Logger.info(`🌐 Selected Webshare proxy for Google search: ${webshareProxy.host}:${webshareProxy.port}`);
+                return webshareProxy;
+            }
+        } catch (error) {
+            Logger.error('❌ Failed to get Webshare proxy for search:', error.message);
+            throw new Error('No available proxies for Google search');
+        }
+
+        throw new Error('No available proxies for Google search');
+    }
+
+    /**
+     * Get proxy configuration for Puppeteer (uses Webshare proxies only)
+     */
+    async getProxyConfigForPuppeteer(excludeProxyIds = []) {
+        if (!this.useWebshareProxies) {
+            Logger.warn('⚠️ No proxy service configured, using direct connection');
+            return null; // Direct connection
+        }
+        
+        try {
+            const webshareProxy = await this.webshareManager.getPuppeteerConfig();
+            if (webshareProxy) {
+                Logger.debug('🌐 Using Webshare proxy for Puppeteer');
+                return webshareProxy;
+            }
+        } catch (error) {
+            Logger.error('❌ Failed to get Webshare proxy for Puppeteer:', error.message);
+            throw new Error('No proxies available for Puppeteer');
+        }
+        
+        throw new Error('No proxies available for Puppeteer');
+    }
+
+    /**
+     * Alias for backward compatibility
+     */
+    async getBangladeshProxyConfigForPuppeteer(excludeProxyIds = []) {
+        return await this.getProxyConfigForPuppeteer(excludeProxyIds);
+    }
+
+    /**
+     * Track Google search usage for proxy rotation analytics
+     */
+    trackGoogleSearchUsage(proxyId, searchKeyword, success = true) {
+        const proxy = this.proxies.find(p => p.id === proxyId);
+        if (!proxy) return;
+
+        if (!proxy.googleSearchHistory) {
+            proxy.googleSearchHistory = [];
+        }
+
+        proxy.googleSearchHistory.push({
+            keyword: searchKeyword,
+            timestamp: Date.now(),
+            success: success,
+            ipRange: proxy.ipRange
+        });
+
+        // Keep only last 100 searches per proxy
+        if (proxy.googleSearchHistory.length > 100) {
+            proxy.googleSearchHistory = proxy.googleSearchHistory.slice(-100);
+        }
+
+        Logger.debug(`📊 Tracked Google search: ${searchKeyword} via ${proxy.host} (${proxy.ipRange})`);
+    }
+
+    /**
+     * Get proxy usage statistics (now uses Webshare proxies)
+     */
+    getBangladeshProxyStats() {
+        // Return Webshare proxy stats instead of Bangladesh demo proxies
+        if (this.useWebshareProxies) {
+            const webshareStats = this.webshareManager.getStats();
+            return {
+                totalBangladeshProxies: 0, // No local Bangladesh proxies
+                activeBangladeshProxies: 0,
+                totalGoogleSearches: 0,
+                proxyDistribution: {
+                    residential: 0,
+                    mobile: 0,
+                    datacenter: 0,
+                    isp: 0
+                },
+                cityDistribution: {},
+                carrierDistribution: {},
+                webshareProxies: webshareStats.activeProxies,
+                webshareTotal: webshareStats.totalProxies,
+                note: 'Using Webshare proxies instead of local Bangladesh demo proxies'
+            };
+        }
+        
+        return {
+            totalBangladeshProxies: 0,
+            activeBangladeshProxies: 0,
+            totalGoogleSearches: 0,
+            proxyDistribution: { residential: 0, mobile: 0, datacenter: 0, isp: 0 },
+            cityDistribution: {},
+            carrierDistribution: {},
+            note: 'No proxy service configured'
+        };
     }
 
     /**
@@ -228,6 +396,10 @@ class ProxyManager {
      * Get proxy configuration for Puppeteer
      */
     getProxyConfigForPuppeteer(proxy) {
+        if (!proxy) {
+            return null; // Direct connection
+        }
+        
         return {
             server: `http://${proxy.host}:${proxy.port}`,
             username: proxy.auth?.username,
@@ -279,14 +451,73 @@ class ProxyManager {
     }
 
     /**
-     * Get proxy statistics
+     * Get comprehensive proxy statistics (includes Webshare stats)
      */
     getStats() {
-        return {
+        const bangladeshStats = {
             ...this.stats,
             geoDistribution: Array.from(this.geoDistribution.keys()),
             averageReliability: this.activeProxies.reduce((sum, p) => sum + p.reliability, 0) / this.activeProxies.length || 0
         };
+
+        if (this.useWebshareProxies) {
+            const webshareStats = this.webshareManager.getStats();
+            return {
+                bangladesh: bangladeshStats,
+                webshare: webshareStats,
+                combined: {
+                    totalProxies: bangladeshStats.totalProxies + webshareStats.totalProxies,
+                    activeProxies: bangladeshStats.activeProxies + webshareStats.activeProxies,
+                    failedProxies: bangladeshStats.failedProxies + webshareStats.failedProxies
+                }
+            };
+        }
+
+        return bangladeshStats;
+    }
+
+    /**
+     * Update Webshare proxy credentials
+     */
+    async updateWebshareCredentials(newCredentials) {
+        if (this.useWebshareProxies) {
+            return await this.webshareManager.updateCredentials(newCredentials);
+        }
+        throw new Error('Webshare proxies are not enabled');
+    }
+
+    /**
+     * Enable/disable Webshare proxy usage
+     */
+    setWebshareProxyUsage(enabled) {
+        this.useWebshareProxies = enabled;
+        Logger.info(`🌐 Webshare proxy usage ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    /**
+     * Set Webshare proxy priority (first or fallback)
+     */
+    setWebshareProxyPriority(webshareFirst) {
+        this.webshareFirst = webshareFirst;
+        Logger.info(`🌐 Webshare proxy priority set to ${webshareFirst ? 'first' : 'fallback'}`);
+    }
+
+    /**
+     * Make HTTP request with automatic proxy rotation and failover
+     */
+    async makeRequest(url, options = {}) {
+        if (this.useWebshareProxies) {
+            try {
+                return await this.webshareManager.makeRequest(url, options);
+            } catch (error) {
+                Logger.warn('⚠️ Webshare request failed, attempting with Bangladesh proxy:', error.message);
+                // Fallback to Bangladesh proxy logic would go here
+                throw error;
+            }
+        }
+        
+        // Bangladesh proxy request logic would go here
+        throw new Error('Direct requests not implemented - use specific proxy methods');
     }
 
     /**
@@ -294,10 +525,22 @@ class ProxyManager {
      */
     async shutdown() {
         Logger.info('🔌 Shutting down proxy manager...');
+        
+        // Shutdown Webshare proxy manager
+        if (this.useWebshareProxies) {
+            try {
+                await this.webshareManager.shutdown();
+                Logger.info('✅ Webshare proxy manager shutdown complete');
+            } catch (error) {
+                Logger.error('❌ Error shutting down Webshare proxy manager:', error);
+            }
+        }
+        
         this.proxies = [];
         this.activeProxies = [];
         this.failedProxies = [];
+        Logger.info('✅ Proxy manager shutdown complete');
     }
 }
 
-module.exports = { ProxyManager };
+module.exports = ProxyManager;

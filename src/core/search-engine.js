@@ -3,10 +3,17 @@
  * Handles search operations across different platforms with optimization
  */
 
-const { SEARCH_PLATFORMS } = require('../config/search-platforms');
+// Import configurations
+const { SEARCH_PLATFORMS, PlatformManager } = require('../config/search-platforms');
 const { ORGANIC_BEHAVIOR } = require('../config/organic-behavior');
 const { PERFORMANCE_CONFIG } = require('../config/performance');
 const { createPlatformLog, getPlatformEmoji } = require('../utils/brand-colors');
+
+// Import link interaction components
+const { DomainDetector } = require('../utils/domain-detector');
+const { HumanBehaviorSimulator } = require('../utils/human-behavior-simulator');
+const { LinkInteractionSystem } = require('../utils/link-interaction-system');
+const { RobustErrorHandler } = require('../utils/error-handler');
 
 class SearchEngine {
     constructor(browserPool, statsTracker) {
@@ -20,6 +27,12 @@ class SearchEngine {
             failedSearches: 0,
             averageSearchTime: 0
         };
+        
+        // Initialize link interaction components
+        this.domainDetector = new DomainDetector();
+        this.humanBehavior = new HumanBehaviorSimulator();
+        this.linkInteraction = new LinkInteractionSystem();
+        this.errorHandler = new RobustErrorHandler();
     }
 
     /**
@@ -34,6 +47,14 @@ class SearchEngine {
      * Perform a search operation
      */
     async performSearch(keyword, platform = 'google', options = {}) {
+        // Check if platform is enabled before proceeding
+        if (!PlatformManager.isPlatformEnabled(platform)) {
+            const error = new Error(`Platform "${platform}" is currently disabled`);
+            error.code = 'PLATFORM_DISABLED';
+            console.log(createPlatformLog(platform, `Search skipped for "${keyword}" - platform is disabled`, 'warning'));
+            throw error;
+        }
+
         const startTime = Date.now();
         let browser = null;
         let success = false;
@@ -44,8 +65,13 @@ class SearchEngine {
         try {
             console.log(createPlatformLog(platform, `Starting search for "${keyword}" on ${platform}`, 'search'));
             
-            // Get browser from pool
-            browser = await this.browserPool.getBrowser();
+            // Get browser from pool - use Bangladesh proxy for Google searches
+            if (platform.toLowerCase() === 'google') {
+                browser = await this.browserPool.getBangladeshBrowserForGoogle();
+                console.log(`🇧🇩 Using Bangladesh proxy browser for Google search: "${keyword}"`);
+            } else {
+                browser = await this.browserPool.getBrowser();
+            }
             
             // Get platform configuration
             const platformConfig = SEARCH_PLATFORMS.find(p => p.name.toLowerCase() === platform.toLowerCase());
@@ -172,6 +198,9 @@ class SearchEngine {
             // Extract search results
             const results = await this.extractSearchResults(page, platformConfig);
 
+            // Detect and interact with target domain links
+            await this.handleTargetDomainInteraction(page, results, platformConfig, keyword);
+
             // Simulate organic browsing behavior
             await this.simulateOrganicBehavior(page, results, platformConfig);
 
@@ -294,7 +323,7 @@ class SearchEngine {
                         visible: element.offsetParent !== null
                     };
                 });
-            }, platformConfig.resultsSelector);
+            }, platformConfig.resultSelector);
 
             console.log(`📊 Extracted ${results.length} search results`);
             return results;
@@ -361,20 +390,146 @@ class SearchEngine {
     }
 
     /**
+     * Handle target domain interaction - detect and interact with kmsmarketplace.com links
+     */
+    async handleTargetDomainInteraction(page, results, platformConfig, keyword) {
+        try {
+            console.log(`🎯 Analyzing search results for target domain interactions...`);
+            
+            // Analyze search results for target domain
+            const domainAnalysis = this.domainDetector.analyzeSearchResults(results, 'kmsmarketplace.com');
+            
+            if (domainAnalysis.targetLinks.length === 0) {
+                console.log(`ℹ️ No kmsmarketplace.com links found in search results for "${keyword}"`);
+                return;
+            }
+
+            console.log(`🎯 Found ${domainAnalysis.targetLinks.length} kmsmarketplace.com link(s) in search results for "${keyword}"`);
+            
+            // Process each target link with human-like behavior
+            for (const linkInfo of domainAnalysis.targetLinks) {
+                try {
+                    console.log(`🔗 Preparing to interact with: ${linkInfo.url}`);
+                    
+                    // Simulate human scanning behavior before interaction
+                    await this.humanBehavior.simulatePageScanning(page);
+                    
+                    // Add natural delay before interaction
+                    await this.humanBehavior.naturalDelay(2000, 5000);
+                    
+                    // Simulate mouse movement and hover before click
+                    await this.humanBehavior.simulateMouseMovement(page, linkInfo.position || 1);
+                    await this.humanBehavior.simulateHover(page, linkInfo.position || 1);
+                    
+                    // Perform the link interaction with error handling
+                    const interactionResult = await this.errorHandler.withErrorHandling(
+                        async () => {
+                            return await this.linkInteraction.performLinkInteraction(
+                                page, 
+                                linkInfo, 
+                                {
+                                    keyword,
+                                    platform: platformConfig.name,
+                                    searchContext: {
+                                        totalResults: results.length,
+                                        targetPosition: linkInfo.position
+                                    }
+                                }
+                            );
+                        },
+                        {
+                            maxRetries: 2,
+                            retryDelay: 3000,
+                            context: `Link interaction for ${linkInfo.url}`
+                        }
+                    );
+
+                    if (interactionResult.success) {
+                        console.log(`✅ Successfully interacted with kmsmarketplace.com link at position ${linkInfo.position}`);
+                        
+                        // Record successful interaction in stats
+                        if (this.statsTracker) {
+                            await this.statsTracker.recordDomainInteraction(
+                                'kmsmarketplace.com',
+                                keyword,
+                                platformConfig.name,
+                                true,
+                                interactionResult.metrics
+                            );
+                        }
+                        
+                        // Add delay between multiple link interactions
+                        if (domainAnalysis.targetLinks.length > 1) {
+                            await this.humanBehavior.naturalDelay(5000, 10000);
+                        }
+                        
+                    } else {
+                        console.warn(`⚠️ Failed to interact with kmsmarketplace.com link: ${interactionResult.error}`);
+                        
+                        // Record failed interaction in stats
+                        if (this.statsTracker) {
+                            await this.statsTracker.recordDomainInteraction(
+                                'kmsmarketplace.com',
+                                keyword,
+                                platformConfig.name,
+                                false,
+                                { error: interactionResult.error }
+                            );
+                        }
+                    }
+
+                } catch (linkError) {
+                    console.error(`❌ Error processing kmsmarketplace.com link at position ${linkInfo.position}:`, linkError.message);
+                    
+                    // Record error in stats
+                    if (this.statsTracker) {
+                        await this.statsTracker.recordDomainInteraction(
+                            'kmsmarketplace.com',
+                            keyword,
+                            platformConfig.name,
+                            false,
+                            { error: linkError.message }
+                        );
+                    }
+                }
+            }
+
+            // Final delay to simulate natural browsing pattern
+            await this.humanBehavior.naturalDelay(3000, 7000);
+            
+        } catch (error) {
+            console.error(`❌ Error in target domain interaction handling:`, error.message);
+        }
+    }
+
+    /**
      * Batch search operations
      */
     async batchSearch(keywords, platforms = ['google'], options = {}) {
         const results = [];
         const batchSize = options.batchSize || PERFORMANCE_CONFIG.maxConcurrentSearches || 3;
         
-        console.log(`🚀 Starting batch search: ${keywords.length} keywords across ${platforms.length} platforms`);
+        // Filter out disabled platforms
+        const enabledPlatforms = platforms.filter(platform => PlatformManager.isPlatformEnabled(platform));
+        
+        if (enabledPlatforms.length === 0) {
+            console.log('⚠️ No enabled platforms found for batch search');
+            return [];
+        }
+        
+        if (enabledPlatforms.length < platforms.length) {
+            const disabledPlatforms = platforms.filter(platform => !PlatformManager.isPlatformEnabled(platform));
+            console.log(`⚠️ Skipping disabled platforms: ${disabledPlatforms.join(', ')}`);
+        }
+        
+        console.log(`🚀 Starting batch search: ${keywords.length} keywords across ${enabledPlatforms.length} enabled platforms`);
         
         for (let i = 0; i < keywords.length; i += batchSize) {
             const batch = keywords.slice(i, i + batchSize);
             const batchPromises = [];
             
             for (const keyword of batch) {
-                for (const platform of platforms) {
+                for (const platform of enabledPlatforms) {
                     batchPromises.push(
                         this.performSearch(keyword, platform, options)
                             .then(result => ({ success: true, result }))

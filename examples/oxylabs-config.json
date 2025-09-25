@@ -1,0 +1,97 @@
+{
+  "_comment": "Oxylabs - Bangladesh Proxy Configuration Example",
+  "_setup_instructions": [
+    "1. Sign up at https://oxylabs.io/",
+    "2. Purchase residential or datacenter proxies",
+    "3. Get your credentials from the dashboard",
+    "4. Replace the placeholder values below",
+    "5. Enable this configuration in proxy-config.json"
+  ],
+
+  "settings": {
+    "country": "BD",
+    "rotation_strategy": "per_request",
+    "session_duration_minutes": 15,
+    "max_retries": 3,
+    "request_timeout_seconds": 25,
+    "enable_health_monitoring": true,
+    "debug_mode": false
+  },
+
+  "targeting": {
+    "cities": {
+      "enabled": true,
+      "preferences": ["dhaka", "chittagong", "rajshahi"],
+      "weights": {
+        "dhaka": 0.7,
+        "chittagong": 0.2,
+        "rajshahi": 0.1
+      }
+    }
+  },
+
+  "providers": {
+    "oxylabs": {
+      "enabled": true,
+      "name": "Oxylabs Bangladesh",
+      "type": "residential",
+      "priority": 1,
+      "credentials": {
+        "username": "your_oxylabs_username",
+        "password": "your_oxylabs_password"
+      },
+      "endpoints": {
+        "residential": {
+          "host": "pr.oxylabs.io",
+          "port": 7777
+        },
+        "datacenter": {
+          "host": "dc.oxylabs.io",
+          "port": 8001
+        }
+      },
+      "session_management": {
+        "sticky_session": true,
+        "session_duration_minutes": 15,
+        "session_id_format": "oxylabs_{timestamp}"
+      },
+      "targeting_parameters": {
+        "country": "BD",
+        "city": "dhaka"
+      },
+      "features": {
+        "city_targeting": true,
+        "carrier_targeting": false,
+        "asn_targeting": false,
+        "session_control": true,
+        "ip_rotation": true
+      },
+      "limits": {
+        "concurrent_sessions": 50,
+        "requests_per_minute": 500,
+        "bandwidth_gb_per_month": 50
+      }
+    }
+  },
+
+  "google_search": {
+    "domains": ["google.com.bd", "google.com"],
+    "parameters": {
+      "gl": "BD",
+      "hl": "bn",
+      "cr": "countryBD"
+    },
+    "rate_limiting": {
+      "requests_per_minute": 12,
+      "requests_per_hour": 150,
+      "requests_per_day": 1500
+    }
+  },
+
+  "example_usage": {
+    "basic_proxy_format": "http://your_oxylabs_username:your_oxylabs_password@pr.oxylabs.io:7777",
+    "country_targeting_format": "http://your_oxylabs_username-country-BD:your_oxylabs_password@pr.oxylabs.io:7777",
+    "city_targeting_format": "http://your_oxylabs_username-country-BD-city-dhaka:your_oxylabs_password@pr.oxylabs.io:7777",
+    "session_format": "http://your_oxylabs_username-session-oxylabs_123:your_oxylabs_password@pr.oxylabs.io:7777"
+  }
+}

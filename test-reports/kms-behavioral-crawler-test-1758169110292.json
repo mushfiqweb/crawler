@@ -1,0 +1,80 @@
+{
+  "testSummary": {
+    "totalTests": 7,
+    "passedTests": 2,
+    "failedTests": 5,
+    "successRate": "28.57%",
+    "timestamp": "2025-09-18T04:18:30.291Z"
+  },
+  "testDetails": [
+    {
+      "test": "Dwell Time Randomization",
+      "status": "PASSED",
+      "details": "All times in range 40-60s, variation detected",
+      "metrics": {
+        "min": 40000,
+        "max": 59832,
+        "count": 10
+      }
+    },
+    {
+      "test": "Click Coordinate Distribution",
+      "status": "FAILED",
+      "error": "behavioralEngine.generateRandomClickCoordinates is not a function"
+    },
+    {
+      "test": "Scrolling Behavior Patterns",
+      "status": "FAILED",
+      "error": "behavioralEngine.generateScrollPattern is not a function"
+    },
+    {
+      "test": "Interaction Logging System",
+      "status": "FAILED",
+      "error": "Incomplete log structure - Fields: undefined, Interactions: false"
+    },
+    {
+      "test": "Human-like Timing Patterns",
+      "status": "PASSED",
+      "details": "Realistic timing with 3150ms average",
+      "metrics": {
+        "min": 1069,
+        "max": 4722,
+        "average": 3150.4,
+        "variation": true
+      }
+    },
+    {
+      "test": "Detection Avoidance Mechanisms",
+      "status": "FAILED",
+      "error": "KMSMarketplaceCrawler is not a constructor"
+    },
+    {
+      "test": "Link Interaction System Integration",
+      "status": "FAILED",
+      "error": "KMSMarketplaceCrawler is not a constructor"
+    }
+  ],
+  "behavioralMetrics": {
+    "dwellTimes": [
+      40000,
+      50756,
+      40000,
+      49634,
+      47859,
+      59832,
+      40585,
+      40000,
+      57171,
+      56026
+    ],
+    "clickPatterns": [],
+    "scrollBehaviors": [],
+    "interactionLogs": []
+  },
+  "recommendations": [
+    "Review failed tests and address underlying issues",
+    "Increase click pattern diversity for better human simulation",
+    "Monitor real-world performance and adjust parameters based on detection rates",
+    "Regularly update user agents and browser configurations"
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "_comment": "Bright Data (Luminati) - Bangladesh Proxy Configuration Example",
+  "_setup_instructions": [
+    "1. Sign up at https://brightdata.com/",
+    "2. Create a residential proxy zone for Bangladesh",
+    "3. Get your zone credentials from the dashboard",
+    "4. Replace the placeholder values below",
+    "5. Enable this configuration in proxy-config.json"
+  ],
+
+  "settings": {
+    "country": "BD",
+    "rotation_strategy": "per_request",
+    "session_duration_minutes": 10,
+    "max_retries": 3,
+    "request_timeout_seconds": 30,
+    "enable_health_monitoring": true,
+    "debug_mode": false
+  },
+
+  "targeting": {
+    "cities": {
+      "enabled": true,
+      "preferences": ["dhaka", "chittagong", "sylhet"],
+      "weights": {
+        "dhaka": 0.6,
+        "chittagong": 0.3,
+        "sylhet": 0.1
+      }
+    },
+    "carriers": {
+      "enabled": true,
+      "preferences": ["grameenphone", "robi", "banglalink"],
+      "weights": {
+        "grameenphone": 0.5,
+        "robi": 0.3,
+        "banglalink": 0.2
+      }
+    }
+  },
+
+  "providers": {
+    "bright_data": {
+      "enabled": true,
+      "name": "Bright Data Bangladesh",
+      "type": "residential",
+      "priority": 1,
+      "credentials": {
+        "username": "brd-customer-hl_12345678-zone-bangladesh_residential",
+        "password": "your_zone_password_here",
+        "zone": "bangladesh_residential"
+      },
+      "endpoints": {
+        "residential": {
+          "host": "zproxy.lum-superproxy.io",
+          "port": 22225
+        },
+        "mobile": {
+          "host": "mobile-proxy.lum-superproxy.io",
+          "port": 22000
+        }
+      },
+      "session_management": {
+        "sticky_session": true,
+        "session_duration_minutes": 10,
+        "session_id_format": "session_{timestamp}_{random}"
+      },
+      "targeting_parameters": {
+        "country": "BD",
+        "city": "dhaka",
+        "carrier": "grameenphone",
+        "asn": "auto"
+      },
+      "features": {
+        "city_targeting": true,
+        "carrier_targeting": true,
+        "asn_targeting": true,
+        "session_control": true,
+        "ip_rotation": true
+      },
+      "limits": {
+        "concurrent_sessions": 100,
+        "requests_per_minute": 1000,
+        "bandwidth_gb_per_month": 100
+      }
+    }
+  },
+
+  "google_search": {
+    "domains": ["google.com.bd"],
+    "parameters": {
+      "gl": "BD",
+      "hl": "bn",
+      "cr": "countryBD"
+    },
+    "rate_limiting": {
+      "requests_per_minute": 15,
+      "requests_per_hour": 200,
+      "requests_per_day": 2000
+    }
+  },
+
+  "example_usage": {
+    "proxy_url_format": "http://brd-customer-hl_12345678-zone-bangladesh_residential-country-BD-city-dhaka:your_zone_password_here@zproxy.lum-superproxy.io:22225",
+    "session_url_format": "http://brd-customer-hl_12345678-zone-bangladesh_residential-country-BD-session-session_123:your_zone_password_here@zproxy.lum-superproxy.io:22225",
+    "city_targeting_format": "http://brd-customer-hl_12345678-zone-bangladesh_residential-country-BD-city-chittagong:your_zone_password_here@zproxy.lum-superproxy.io:22225"
+  }
+}

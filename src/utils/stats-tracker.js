@@ -22,7 +22,17 @@ class StatsTracker {
                 sessionStart: new Date().toISOString()
             },
             daily: new Map(),
-            hourly: new Map()
+            hourly: new Map(),
+            domainInteractions: {
+                'kmsmarketplace.com': {
+                    totalInteractions: 0,
+                    successfulInteractions: 0,
+                    failedInteractions: 0,
+                    keywordBreakdown: new Map(),
+                    platformBreakdown: new Map(),
+                    lastInteraction: null
+                }
+            }
         };
         this.isLoaded = false;
     }
@@ -156,6 +166,54 @@ class StatsTracker {
             
         } catch (error) {
             console.error('❌ Error recording keyword search:', error.message);
+        }
+    }
+
+    /**
+     * Record a domain interaction (e.g., kmsmarketplace.com link click)
+     */
+    async recordDomainInteraction(domain, keyword, platform, success = true, metrics = {}) {
+        try {
+            // Ensure domain tracking exists
+            if (!this.stats.domainInteractions[domain]) {
+                this.stats.domainInteractions[domain] = {
+                    totalInteractions: 0,
+                    successfulInteractions: 0,
+                    failedInteractions: 0,
+                    keywordBreakdown: new Map(),
+                    platformBreakdown: new Map(),
+                    lastInteraction: null
+                };
+            }
+
+            const domainStats = this.stats.domainInteractions[domain];
+
+            // Update interaction counts
+            domainStats.totalInteractions++;
+            if (success) {
+                domainStats.successfulInteractions++;
+            } else {
+                domainStats.failedInteractions++;
+            }
+
+            // Update keyword breakdown
+            const keywordCount = domainStats.keywordBreakdown.get(keyword) || 0;
+            domainStats.keywordBreakdown.set(keyword, keywordCount + 1);
+
+            // Update platform breakdown
+            const platformCount = domainStats.platformBreakdown.get(platform) || 0;
+            domainStats.platformBreakdown.set(platform, platformCount + 1);
+
+            // Update last interaction timestamp
+            domainStats.lastInteraction = new Date().toISOString();
+
+            // Save to file
+            await this.saveStats();
+
+            console.log(`🎯 Recorded domain interaction: ${domain} for "${keyword}" on ${platform} (${success ? 'success' : 'failed'})`);
+
+        } catch (error) {
+            console.error('❌ Error recording domain interaction:', error.message);
         }
     }
 
@@ -340,7 +398,17 @@ class StatsTracker {
                 sessionStart: new Date().toISOString()
             },
             daily: new Map(),
-            hourly: new Map()
+            hourly: new Map(),
+            domainInteractions: {
+                'kmsmarketplace.com': {
+                    totalInteractions: 0,
+                    successfulInteractions: 0,
+                    failedInteractions: 0,
+                    keywordBreakdown: new Map(),
+                    platformBreakdown: new Map(),
+                    lastInteraction: null
+                }
+            }
         };
         
         await this.saveStats();
