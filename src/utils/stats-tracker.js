@@ -35,6 +35,16 @@ class StatsTracker {
             }
         };
         this.isLoaded = false;
+        
+        // Memory optimization settings
+        this.maxKeywords = 1000; // Limit keyword tracking
+        this.maxDailyEntries = 30; // Keep only 30 days
+        this.maxHourlyEntries = 168; // Keep only 7 days of hourly data
+        this.maxDomainKeywords = 100; // Limit per-domain keyword tracking
+        this.cleanupInterval = 60000; // Cleanup every minute
+        
+        // Start periodic cleanup
+        this.startPeriodicCleanup();
     }
 
     /**
@@ -427,6 +437,386 @@ class StatsTracker {
             hourly: Object.fromEntries(this.stats.hourly),
             exportedAt: new Date().toISOString()
         };
+    }
+
+    /**
+     * Start periodic cleanup to manage memory usage
+     */
+    startPeriodicCleanup() {
+        this.cleanupTimer = setInterval(() => {
+            this.performMemoryCleanup();
+        }, this.cleanupInterval);
+    }
+
+    /**
+     * Stop periodic cleanup
+     */
+    stopPeriodicCleanup() {
+        if (this.cleanupTimer) {
+            clearInterval(this.cleanupTimer);
+            this.cleanupTimer = null;
+        }
+    }
+
+    /**
+     * Perform memory cleanup to prevent excessive memory usage
+     */
+    performMemoryCleanup() {
+        try {
+            // Limit keyword tracking
+            if (this.stats.keywords.size > this.maxKeywords) {
+                const sortedKeywords = Array.from(this.stats.keywords.entries())
+                    .sort((a, b) => b[1] - a[1]) // Sort by count descending
+                    .slice(0, this.maxKeywords);
+                
+                this.stats.keywords.clear();
+                sortedKeywords.forEach(([keyword, count]) => {
+                    this.stats.keywords.set(keyword, count);
+                });
+                
+                console.log(`🧹 Cleaned up keywords: kept top ${this.maxKeywords}`);
+            }
+
+            // Cleanup old daily entries
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - this.maxDailyEntries);
+            
+            for (const [dateStr] of this.stats.daily) {
+                const entryDate = new Date(dateStr);
+                if (entryDate < cutoffDate) {
+                    this.stats.daily.delete(dateStr);
+                }
+            }
+
+            // Cleanup old hourly entries (keep only recent hours)
+            const currentHour = new Date().getHours();
+            const hoursToKeep = new Set();
+            
+            // Keep current hour and previous hours within limit
+            for (let i = 0; i < this.maxHourlyEntries; i++) {
+                const hour = (currentHour - i + 24) % 24;
+                hoursToKeep.add(hour);
+            }
+            
+            for (const hour of this.stats.hourly.keys()) {
+                if (!hoursToKeep.has(hour)) {
+                    this.stats.hourly.delete(hour);
+                }
+            }
+
+            // Cleanup domain interaction keyword breakdowns
+            for (const domain in this.stats.domainInteractions) {
+                const domainStats = this.stats.domainInteractions[domain];
+                if (domainStats.keywordBreakdown.size > this.maxDomainKeywords) {
+                    const sortedDomainKeywords = Array.from(domainStats.keywordBreakdown.entries())
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, this.maxDomainKeywords);
+                    
+                    domainStats.keywordBreakdown.clear();
+                    sortedDomainKeywords.forEach(([keyword, count]) => {
+                        domainStats.keywordBreakdown.set(keyword, count);
+                    });
+                }
+            }
+
+        } catch (error) {
+            console.error('❌ Error during stats cleanup:', error.message);
+        }
+    }
+
+    /**
+     * Get memory usage statistics
+     */
+    getMemoryUsage() {
+        return {
+            keywordCount: this.stats.keywords.size,
+            platformCount: this.stats.platforms.size,
+            dailyEntries: this.stats.daily.size,
+            hourlyEntries: this.stats.hourly.size,
+            domainCount: Object.keys(this.stats.domainInteractions).length,
+            totalDomainKeywords: Object.values(this.stats.domainInteractions)
+                .reduce((sum, domain) => sum + domain.keywordBreakdown.size, 0)
+        };
+    }
+
+    /**
+     * Force cleanup and optimization
+     */
+    async optimizeMemory() {
+        this.performMemoryCleanup();
+        await this.saveStats();
+        console.log('🧠 Stats memory optimization completed');
+    }
+
+    /**
+     * Stream-based batch recording for memory efficiency
+     */
+    async streamBatchRecord(dataStream, options = {}) {
+        const { Readable, Transform, Writable } = require('stream');
+        const { pipeline } = require('stream/promises');
+        
+        let processedCount = 0;
+        let successCount = 0;
+        let errorCount = 0;
+        
+        const batchSize = options.batchSize || 50;
+        let batch = [];
+        
+        try {
+            const processTransform = new Transform({
+                objectMode: true,
+                async transform(chunk, encoding, callback) {
+                    try {
+                        batch.push(chunk);
+                        
+                        // Process batch when it reaches the specified size
+                        if (batch.length >= batchSize) {
+                            await this.processBatch(batch);
+                            batch = []; // Clear batch after processing
+                            
+                            // Trigger memory cleanup periodically
+                            if (processedCount % (batchSize * 10) === 0) {
+                                this.performMemoryCleanup();
+                            }
+                        }
+                        
+                        processedCount++;
+                        this.push(chunk);
+                        callback();
+                    } catch (error) {
+                        errorCount++;
+                        callback(error);
+                    }
+                }
+            });
+            
+            const outputStream = new Writable({
+                objectMode: true,
+                write(chunk, encoding, callback) {
+                    if (chunk.success !== false) {
+                        successCount++;
+                    }
+                    callback();
+                },
+                final: async (callback) => {
+                    // Process remaining batch
+                    if (batch.length > 0) {
+                        await this.processBatch(batch);
+                    }
+                    
+                    // Save stats after processing
+                    await this.saveStats();
+                    
+                    console.log(`📊 Stream batch recording completed: ${processedCount} processed, ${successCount} successful, ${errorCount} errors`);
+                    callback();
+                }
+            });
+            
+            await pipeline(dataStream, processTransform, outputStream);
+            
+            return {
+                processed: processedCount,
+                successful: successCount,
+                errors: errorCount
+            };
+            
+        } catch (error) {
+            console.error('❌ Stream batch recording failed:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Process a batch of statistical data
+     */
+    async processBatch(batch) {
+        for (const item of batch) {
+            try {
+                switch (item.type) {
+                    case 'keyword_search':
+                        await this.recordKeywordSearch(
+                            item.keyword, 
+                            item.platform, 
+                            item.success, 
+                            item.searchTime
+                        );
+                        break;
+                    case 'domain_interaction':
+                        await this.recordDomainInteraction(
+                            item.domain,
+                            item.keyword,
+                            item.platform,
+                            item.success,
+                            item.metrics
+                        );
+                        break;
+                    default:
+                        console.warn(`⚠️ Unknown batch item type: ${item.type}`);
+                }
+            } catch (error) {
+                console.error(`❌ Error processing batch item:`, error.message);
+            }
+        }
+    }
+
+    /**
+     * Create a readable stream from stats data for export
+     */
+    createStatsExportStream() {
+        const { Readable } = require('stream');
+        
+        const statsData = [
+            ...Array.from(this.stats.keywords.entries()).map(([keyword, count]) => ({
+                type: 'keyword',
+                keyword,
+                count,
+                timestamp: Date.now()
+            })),
+            ...Array.from(this.stats.platforms.entries()).map(([platform, count]) => ({
+                type: 'platform',
+                platform,
+                count,
+                timestamp: Date.now()
+            })),
+            ...Array.from(this.stats.daily.entries()).map(([date, data]) => ({
+                type: 'daily',
+                date,
+                data,
+                timestamp: Date.now()
+            })),
+            ...Array.from(this.stats.hourly.entries()).map(([hour, data]) => ({
+                type: 'hourly',
+                hour,
+                data,
+                timestamp: Date.now()
+            }))
+        ];
+        
+        let index = 0;
+        
+        return new Readable({
+            objectMode: true,
+            read() {
+                if (index >= statsData.length) {
+                    this.push(null); // End of stream
+                    return;
+                }
+                
+                this.push(statsData[index++]);
+                
+                // Clear reference to help with garbage collection
+                if (index % 100 === 0) {
+                    statsData.splice(0, 100);
+                    index -= 100;
+                }
+            }
+        });
+    }
+
+    /**
+     * Stream-based stats export for memory efficiency
+     */
+    async streamExportStats(outputStream, format = 'json') {
+        const { Transform } = require('stream');
+        const { pipeline } = require('stream/promises');
+        
+        const statsStream = this.createStatsExportStream();
+        
+        const formatTransform = new Transform({
+            objectMode: true,
+            transform(chunk, encoding, callback) {
+                try {
+                    let formatted;
+                    
+                    switch (format) {
+                        case 'json':
+                            formatted = JSON.stringify(chunk) + '\n';
+                            break;
+                        case 'csv':
+                            formatted = `${chunk.type},${chunk.timestamp},${JSON.stringify(chunk)}\n`;
+                            break;
+                        default:
+                            formatted = chunk.toString() + '\n';
+                    }
+                    
+                    this.push(formatted);
+                    callback();
+                } catch (error) {
+                    callback(error);
+                }
+            }
+        });
+        
+        await pipeline(statsStream, formatTransform, outputStream);
+        console.log(`📤 Stats export completed in ${format} format`);
+    }
+
+    /**
+     * Memory-efficient stats aggregation using streams
+     */
+    async streamAggregateStats(aggregationType = 'daily') {
+        const { Readable, Transform, Writable } = require('stream');
+        const { pipeline } = require('stream/promises');
+        
+        const aggregatedData = new Map();
+        
+        const statsStream = this.createStatsExportStream();
+        
+        const aggregateTransform = new Transform({
+            objectMode: true,
+            transform(chunk, encoding, callback) {
+                try {
+                    let key;
+                    
+                    switch (aggregationType) {
+                        case 'daily':
+                            key = new Date(chunk.timestamp).toDateString();
+                            break;
+                        case 'hourly':
+                            const date = new Date(chunk.timestamp);
+                            key = `${date.toDateString()}-${date.getHours()}`;
+                            break;
+                        case 'platform':
+                            key = chunk.platform || chunk.type;
+                            break;
+                        default:
+                            key = chunk.type;
+                    }
+                    
+                    if (!aggregatedData.has(key)) {
+                        aggregatedData.set(key, { count: 0, items: [] });
+                    }
+                    
+                    const existing = aggregatedData.get(key);
+                    existing.count++;
+                    existing.items.push(chunk);
+                    
+                    // Limit items to prevent memory bloat
+                    if (existing.items.length > 100) {
+                        existing.items = existing.items.slice(-50);
+                    }
+                    
+                    callback();
+                } catch (error) {
+                    callback(error);
+                }
+            }
+        });
+        
+        const outputStream = new Writable({
+            objectMode: true,
+            write(chunk, encoding, callback) {
+                callback();
+            },
+            final(callback) {
+                console.log(`📈 Stats aggregation completed: ${aggregatedData.size} ${aggregationType} groups`);
+                callback();
+            }
+        });
+        
+        await pipeline(statsStream, aggregateTransform, outputStream);
+        
+        return Object.fromEntries(aggregatedData);
     }
 }
 
