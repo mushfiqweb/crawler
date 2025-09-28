@@ -14,6 +14,12 @@ const { DomainDetector } = require('../utils/domain-detector');
 const { HumanBehaviorSimulator } = require('../utils/human-behavior-simulator');
 const { LinkInteractionSystem } = require('../utils/link-interaction-system');
 const { RobustErrorHandler } = require('../utils/error-handler');
+const { ConcurrentOptimizer } = require('../utils/concurrent-optimizer');
+const ImmediateProcessor = require('../utils/immediate-processor');
+
+// Import Node.js streams for memory-efficient processing
+const { Readable, Transform, Writable } = require('stream');
+const { pipeline } = require('stream/promises');
 
 class SearchEngine {
     constructor(browserPool, statsTracker) {
@@ -33,6 +39,37 @@ class SearchEngine {
         this.humanBehavior = new HumanBehaviorSimulator();
         this.linkInteraction = new LinkInteractionSystem();
         this.errorHandler = new RobustErrorHandler();
+
+        // Stream processing configuration
+        this.streamConfig = {
+            batchSize: PERFORMANCE_CONFIG.maxConcurrentSearches || 3,
+            maxConcurrency: 5,
+            resultBufferSize: 100,
+            memoryThreshold: 100 * 1024 * 1024 // 100MB
+        };
+        
+        // Concurrent optimizer for memory-efficient batch operations
+        this.concurrentOptimizer = new ConcurrentOptimizer({
+            maxConcurrency: PERFORMANCE_CONFIG.maxConcurrentSearches || 3,
+            memoryThreshold: 250 * 1024 * 1024, // 250MB
+            batchSize: 5,
+            enableMemoryMonitoring: true,
+            enableGarbageCollection: true,
+            promiseTimeout: 120000 // 2 minutes for search operations
+        });
+        
+        // Immediate processor for data processing and disposal
+        this.immediateProcessor = new ImmediateProcessor({
+            maxBufferSize: 50,
+            processingTimeout: 10000,
+            autoFlush: true,
+            flushInterval: 2000,
+            enableMetrics: true,
+            maxRetries: 2,
+            retryDelay: 500
+        });
+        
+        this.setupImmediateProcessors();
     }
 
     /**
@@ -198,18 +235,33 @@ class SearchEngine {
             // Extract search results
             const results = await this.extractSearchResults(page, platformConfig);
 
+            // Process results immediately for memory efficiency
+            const searchMetadata = {
+                keyword,
+                platform: platformConfig.name,
+                url: searchUrl,
+                resultsCount: results.length,
+                timestamp: new Date().toISOString(),
+                success: true,
+                searchTime: Date.now() - (options.startTime || Date.now())
+            };
+            
+            // Immediate processing and disposal
+            await this.processSearchResultsImmediate(results, searchMetadata);
+
             // Detect and interact with target domain links
             await this.handleTargetDomainInteraction(page, results, platformConfig, keyword);
 
             // Simulate organic browsing behavior
             await this.simulateOrganicBehavior(page, results, platformConfig);
 
+            // Return minimal metadata (results already processed and disposed)
             return {
                 keyword,
                 platform: platformConfig.name,
                 url: searchUrl,
                 results: results.length,
-                timestamp: new Date().toISOString(),
+                timestamp: searchMetadata.timestamp,
                 success: true
             };
 
@@ -503,12 +555,9 @@ class SearchEngine {
     }
 
     /**
-     * Batch search operations
+     * Batch search operations with memory optimization
      */
     async batchSearch(keywords, platforms = ['google'], options = {}) {
-        const results = [];
-        const batchSize = options.batchSize || PERFORMANCE_CONFIG.maxConcurrentSearches || 3;
-        
         // Filter out disabled platforms
         const enabledPlatforms = platforms.filter(platform => PlatformManager.isPlatformEnabled(platform));
         
@@ -522,37 +571,49 @@ class SearchEngine {
             console.log(`⚠️ Skipping disabled platforms: ${disabledPlatforms.join(', ')}`);
         }
         
-        console.log(`🚀 Starting batch search: ${keywords.length} keywords across ${enabledPlatforms.length} enabled platforms`);
+        console.log(`🚀 Starting optimized batch search: ${keywords.length} keywords across ${enabledPlatforms.length} enabled platforms`);
         
-        for (let i = 0; i < keywords.length; i += batchSize) {
-            const batch = keywords.slice(i, i + batchSize);
-            const batchPromises = [];
-            
-            for (const keyword of batch) {
-                for (const platform of enabledPlatforms) {
-                    batchPromises.push(
-                        this.performSearch(keyword, platform, options)
-                            .then(result => ({ success: true, result }))
-                            .catch(error => ({ success: false, error: error.message, keyword, platform }))
-                    );
-                }
-            }
-            
-            const batchResults = await Promise.all(batchPromises);
-            results.push(...batchResults);
-            
-            // Delay between batches
-            if (i + batchSize < keywords.length) {
-                await this.organicDelay(5000, 10000);
+        // Create search operations for concurrent execution
+        const operations = [];
+        for (const keyword of keywords) {
+            for (const platform of enabledPlatforms) {
+                operations.push({
+                    name: `search_${keyword}_${platform}`,
+                    keyword,
+                    platform,
+                    execute: async () => {
+                        try {
+                            const result = await this.performSearch(keyword, platform, options);
+                            return { success: true, result, keyword, platform };
+                        } catch (error) {
+                            return { success: false, error: error.message, keyword, platform };
+                        }
+                    }
+                });
             }
         }
         
-        const successful = results.filter(r => r.success).length;
-        const failed = results.filter(r => !r.success).length;
-        
-        console.log(`✅ Batch search completed: ${successful} successful, ${failed} failed`);
-        
-        return results;
+        try {
+            // Execute with concurrent optimizer
+            const result = await this.concurrentOptimizer.executeConcurrent(operations, {
+                maxConcurrency: options.maxConcurrency || PERFORMANCE_CONFIG.maxConcurrentSearches || 3,
+                batchSize: options.batchSize || 5,
+                promiseTimeout: options.timeout || 120000
+            });
+            
+            const allResults = [...result.results.map(r => r.result), ...result.errors.map(e => e.error)];
+            const successful = result.results.length;
+            const failed = result.errors.length;
+            
+            console.log(`✅ Optimized batch search completed: ${successful} successful, ${failed} failed`);
+            console.log(`📊 Concurrent stats: ${JSON.stringify(result.stats, null, 2)}`);
+            
+            return allResults;
+            
+        } catch (error) {
+            console.error('❌ Optimized batch search failed:', error);
+            throw error;
+        }
     }
 
     /**
@@ -577,6 +638,359 @@ class SearchEngine {
             failedSearches: 0,
             averageSearchTime: 0
         };
+    }
+
+    /**
+     * Create a readable stream for keyword processing
+     */
+    createKeywordStream(keywords, platforms = ['google']) {
+        let index = 0;
+        const enabledPlatforms = platforms.filter(platform => PlatformManager.isPlatformEnabled(platform));
+        
+        return new Readable({
+            objectMode: true,
+            read() {
+                if (index >= keywords.length) {
+                    this.push(null); // End of stream
+                    return;
+                }
+                
+                const keyword = keywords[index++];
+                for (const platform of enabledPlatforms) {
+                    this.push({ keyword, platform, index: index - 1 });
+                }
+            }
+        });
+    }
+
+    /**
+     * Create a transform stream for search processing
+     */
+    createSearchTransform(options = {}) {
+        let activeSearches = 0;
+        const maxConcurrency = this.streamConfig.maxConcurrency;
+        
+        return new Transform({
+            objectMode: true,
+            async transform(chunk, encoding, callback) {
+                try {
+                    // Wait if we've reached max concurrency
+                    while (activeSearches >= maxConcurrency) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                    
+                    activeSearches++;
+                    
+                    const result = await this.performSearch(chunk.keyword, chunk.platform, options)
+                        .then(result => ({ 
+                            success: true, 
+                            result, 
+                            keyword: chunk.keyword, 
+                            platform: chunk.platform,
+                            index: chunk.index
+                        }))
+                        .catch(error => ({ 
+                            success: false, 
+                            error: error.message, 
+                            keyword: chunk.keyword, 
+                            platform: chunk.platform,
+                            index: chunk.index
+                        }));
+                    
+                    activeSearches--;
+                    
+                    // Memory optimization: immediately process and dispose
+                    this.push(result);
+                    
+                    // Trigger garbage collection if memory usage is high
+                    if (process.memoryUsage().heapUsed > this.streamConfig.memoryThreshold) {
+                        if (global.gc) {
+                            global.gc();
+                        }
+                    }
+                    
+                    callback();
+                } catch (error) {
+                    activeSearches--;
+                    callback(error);
+                }
+            }
+        });
+    }
+
+    /**
+     * Create a writable stream for result processing
+     */
+    createResultStream(onResult, onComplete) {
+        const results = [];
+        let processedCount = 0;
+        
+        return new Writable({
+            objectMode: true,
+            write(chunk, encoding, callback) {
+                try {
+                    processedCount++;
+                    
+                    // Process result immediately
+                    if (onResult) {
+                        onResult(chunk, processedCount);
+                    }
+                    
+                    // Keep only essential data in memory
+                    if (chunk.success) {
+                        results.push({
+                            keyword: chunk.keyword,
+                            platform: chunk.platform,
+                            success: true,
+                            timestamp: Date.now()
+                        });
+                    } else {
+                        results.push({
+                            keyword: chunk.keyword,
+                            platform: chunk.platform,
+                            success: false,
+                            error: chunk.error,
+                            timestamp: Date.now()
+                        });
+                    }
+                    
+                    // Limit result buffer size
+                    if (results.length > this.streamConfig.resultBufferSize) {
+                        results.splice(0, results.length - this.streamConfig.resultBufferSize);
+                    }
+                    
+                    callback();
+                } catch (error) {
+                    callback(error);
+                }
+            },
+            final(callback) {
+                if (onComplete) {
+                    onComplete(results, processedCount);
+                }
+                callback();
+            }
+        });
+    }
+
+    /**
+     * Stream-based batch search for memory efficiency
+     */
+    async streamBatchSearch(keywords, platforms = ['google'], options = {}) {
+        console.log(`🌊 Starting stream-based batch search: ${keywords.length} keywords`);
+        
+        const results = [];
+        let processedCount = 0;
+        let successCount = 0;
+        let failureCount = 0;
+        
+        try {
+            const keywordStream = this.createKeywordStream(keywords, platforms);
+            const searchTransform = this.createSearchTransform(options);
+            const resultStream = this.createResultStream(
+                (result, count) => {
+                    processedCount = count;
+                    if (result.success) {
+                        successCount++;
+                    } else {
+                        failureCount++;
+                    }
+                    
+                    // Log progress periodically
+                    if (count % 10 === 0) {
+                        console.log(`🔄 Processed ${count} searches (${successCount} success, ${failureCount} failed)`);
+                    }
+                },
+                (finalResults, totalCount) => {
+                    results.push(...finalResults);
+                    console.log(`✅ Stream processing completed: ${totalCount} total, ${successCount} successful, ${failureCount} failed`);
+                }
+            );
+            
+            // Use pipeline for automatic error handling and cleanup
+            await pipeline(keywordStream, searchTransform, resultStream);
+            
+            return {
+                results,
+                stats: {
+                    total: processedCount,
+                    successful: successCount,
+                    failed: failureCount,
+                    successRate: processedCount > 0 ? ((successCount / processedCount) * 100).toFixed(2) + '%' : '0%'
+                }
+            };
+            
+        } catch (error) {
+            console.error('❌ Stream batch search failed:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Memory-efficient result processing stream
+     */
+    async processResultsStream(results, processor) {
+        const resultStream = new Readable({
+            objectMode: true,
+            read() {
+                const result = results.shift();
+                if (result) {
+                    this.push(result);
+                } else {
+                    this.push(null);
+                }
+            }
+        });
+        
+        const processTransform = new Transform({
+            objectMode: true,
+            async transform(chunk, encoding, callback) {
+                try {
+                    const processed = await processor(chunk);
+                    this.push(processed);
+                    callback();
+                } catch (error) {
+                    callback(error);
+                }
+            }
+        });
+        
+        const outputStream = new Writable({
+            objectMode: true,
+            write(chunk, encoding, callback) {
+                // Immediate disposal after processing
+                callback();
+            }
+        });
+        
+        await pipeline(resultStream, processTransform, outputStream);
+    }
+    
+    /**
+     * Setup immediate processors for different data types
+     */
+    setupImmediateProcessors() {
+        // Search results processor
+        this.immediateProcessor.registerProcessor('searchResults', async (results, options) => {
+            if (!results || !Array.isArray(results)) return;
+            
+            // Process each result immediately
+            for (const result of results) {
+                // Update statistics
+                if (this.statsTracker) {
+                    this.statsTracker.recordSearchResult(result);
+                }
+                
+                // Log important results
+                if (result.isTargetDomain) {
+                    console.log(`🎯 Target domain found: ${result.title} - ${result.url}`);
+                }
+            }
+            
+            return { processed: results.length, timestamp: Date.now() };
+        });
+        
+        // Search metadata processor
+        this.immediateProcessor.registerProcessor('searchMetadata', async (metadata, options) => {
+            if (!metadata) return;
+            
+            // Update search statistics
+            this.stats.totalSearches++;
+            if (metadata.success) {
+                this.stats.successfulSearches++;
+            } else {
+                this.stats.failedSearches++;
+            }
+            
+            // Update average search time
+            if (metadata.searchTime) {
+                const totalTime = this.stats.averageSearchTime * (this.stats.totalSearches - 1);
+                this.stats.averageSearchTime = (totalTime + metadata.searchTime) / this.stats.totalSearches;
+            }
+            
+            return { updated: true };
+        });
+        
+        // Page data processor
+        this.immediateProcessor.registerProcessor('pageData', async (pageData, options) => {
+            if (!pageData) return;
+            
+            // Extract and process only essential data
+            const essential = {
+                url: pageData.url,
+                title: pageData.title,
+                timestamp: Date.now()
+            };
+            
+            // Clear large data immediately
+            if (pageData.content) {
+                pageData.content = null;
+            }
+            if (pageData.html) {
+                pageData.html = null;
+            }
+            
+            return essential;
+        });
+        
+        // Default disposer for all data types
+        this.immediateProcessor.registerDisposer('default', async (data) => {
+            if (data && typeof data === 'object') {
+                // Clear object properties
+                Object.keys(data).forEach(key => {
+                    if (typeof data[key] === 'object' && data[key] !== null) {
+                        data[key] = null;
+                    }
+                });
+            }
+        });
+        
+        // Search results specific disposer
+        this.immediateProcessor.registerDisposer('searchResults', async (results) => {
+            if (Array.isArray(results)) {
+                results.forEach(result => {
+                    if (result && typeof result === 'object') {
+                        // Clear large properties
+                        result.description = null;
+                        result.snippet = null;
+                        result.metadata = null;
+                    }
+                });
+                results.length = 0; // Clear array
+            }
+        });
+    }
+    
+    /**
+     * Process search results immediately
+     */
+    async processSearchResultsImmediate(results, metadata = {}) {
+        try {
+            // Process results immediately
+            await this.immediateProcessor.process(results, 'searchResults', { immediate: true });
+            
+            // Process metadata immediately
+            await this.immediateProcessor.process(metadata, 'searchMetadata', { immediate: true });
+            
+        } catch (error) {
+            console.error('Error in immediate processing:', error.message);
+        }
+    }
+    
+    /**
+     * Get immediate processor metrics
+     */
+    getImmediateProcessorStats() {
+        return this.immediateProcessor.getMetrics();
+    }
+    
+    /**
+     * Shutdown immediate processor
+     */
+    async shutdownImmediateProcessor() {
+        if (this.immediateProcessor) {
+            await this.immediateProcessor.shutdown();
+        }
     }
 }
 

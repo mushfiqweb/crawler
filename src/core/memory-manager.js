@@ -4,6 +4,8 @@
  */
 
 const { PERFORMANCE_CONFIG } = require('../config/performance');
+const { MemoryMonitor } = require('../utils/memory-monitor');
+const { defaultLogger: Logger } = require('../utils/logger');
 
 class MemoryManager {
     constructor() {
@@ -18,6 +20,99 @@ class MemoryManager {
             memoryReadings: []
         };
         this.gcTimer = null;
+        
+        // Initialize memory monitor
+        this.memoryMonitor = new MemoryMonitor({
+            monitoringInterval: 30000, // 30 seconds
+            heapUsedThreshold: this.memoryThreshold * 0.7, // 70% of threshold
+            criticalHeapUsed: this.memoryThreshold * 0.9, // 90% of threshold
+            enableGCStats: true
+        });
+        
+        this.setupMemoryMonitorEvents();
+    }
+
+    /**
+     * Setup memory monitor event handlers
+     */
+    setupMemoryMonitorEvents() {
+        this.memoryMonitor.on('memoryAlert', (alert) => {
+            Logger.warn('Memory alert received', alert);
+            this.handleMemoryAlert(alert);
+        });
+
+        this.memoryMonitor.on('memoryCritical', (critical) => {
+            Logger.error('Critical memory condition', critical);
+            this.handleCriticalMemory(critical);
+        });
+
+        this.memoryMonitor.on('memoryStats', (stats) => {
+            // Update internal stats with monitor data
+            this.updateInternalStats(stats);
+        });
+    }
+
+    /**
+     * Handle memory alerts
+     */
+    async handleMemoryAlert(alert) {
+        Logger.info('Handling memory alert', { type: alert.type, metric: alert.metric });
+        
+        // Perform cleanup based on alert type
+        switch (alert.metric) {
+            case 'heapUsed':
+                await this.performMemoryCleanup();
+                break;
+            case 'external':
+                await this.clearLargeObjectReferences();
+                break;
+            case 'rss':
+                await this.comprehensiveMemoryCleanup();
+                break;
+        }
+    }
+
+    /**
+     * Handle critical memory conditions
+     */
+    async handleCriticalMemory(critical) {
+        Logger.error('Handling critical memory condition', { metric: critical.metric });
+        
+        // Perform emergency cleanup
+        await this.performEmergencyCleanup();
+        
+        // Force garbage collection
+        this.memoryMonitor.forceGarbageCollection();
+    }
+
+    /**
+     * Update internal stats with monitor data
+     */
+    updateInternalStats(monitorStats) {
+        const { memory } = monitorStats;
+        
+        // Update peak memory
+        if (memory.heapUsed > this.stats.peakMemory) {
+            this.stats.peakMemory = memory.heapUsed;
+        }
+        
+        // Add to readings
+        this.stats.memoryReadings.push({
+            timestamp: monitorStats.timestamp,
+            heapUsed: memory.heapUsed,
+            heapTotal: memory.heapTotal,
+            external: memory.external,
+            rss: memory.rss
+        });
+        
+        // Keep only last 100 readings
+        if (this.stats.memoryReadings.length > 100) {
+            this.stats.memoryReadings.shift();
+        }
+        
+        // Calculate average
+        const totalMemory = this.stats.memoryReadings.reduce((sum, reading) => sum + reading.heapUsed, 0);
+        this.stats.averageMemory = totalMemory / this.stats.memoryReadings.length;
     }
 
     /**
@@ -35,19 +130,17 @@ class MemoryManager {
         if (this.monitoring) return;
         
         this.monitoring = true;
-        console.log('🧠 Starting memory monitoring...');
+        Logger.info('🧠 Starting comprehensive memory monitoring...');
+        
+        // Start the advanced memory monitor
+        this.memoryMonitor.startMonitoring();
         
         // Start periodic garbage collection
         this.gcTimer = setInterval(() => {
             this.performGarbageCollection();
         }, this.gcInterval);
 
-        // Monitor memory usage every 30 seconds
-        setInterval(() => {
-            this.recordMemoryUsage();
-        }, 30000);
-
-        console.log('✅ Memory monitoring started');
+        Logger.info('✅ Memory monitoring started with advanced features');
     }
 
     /**
@@ -58,12 +151,15 @@ class MemoryManager {
         
         this.monitoring = false;
         
+        // Stop the advanced memory monitor
+        this.memoryMonitor.stopMonitoring();
+        
         if (this.gcTimer) {
             clearInterval(this.gcTimer);
             this.gcTimer = null;
         }
         
-        console.log('🛑 Memory monitoring stopped');
+        Logger.info('🛑 Memory monitoring stopped');
     }
 
     /**
@@ -121,9 +217,85 @@ class MemoryManager {
                 }
             } else {
                 console.warn('⚠️ Garbage collection not available. Run with --expose-gc flag.');
+                // Fallback: trigger manual cleanup
+                this.manualMemoryCleanup();
             }
         } catch (error) {
             console.error('❌ Error during garbage collection:', error.message);
+        }
+    }
+
+    /**
+     * Force aggressive garbage collection
+     */
+    forceGarbageCollection() {
+        try {
+            const beforeMemory = process.memoryUsage().heapUsed;
+            
+            if (global.gc) {
+                // Run multiple GC cycles for thorough cleanup
+                for (let i = 0; i < 5; i++) {
+                    global.gc();
+                }
+                this.stats.gcRuns += 5;
+                
+                const afterMemory = process.memoryUsage().heapUsed;
+                const freed = beforeMemory - afterMemory;
+                
+                console.log(`🗑️ Aggressive GC freed ${this.formatBytes(freed)} memory`);
+            } else {
+                // Fallback: comprehensive manual cleanup
+                this.comprehensiveMemoryCleanup();
+            }
+        } catch (error) {
+            console.error('❌ Error during aggressive garbage collection:', error.message);
+        }
+    }
+
+    /**
+     * Manual memory cleanup when GC is not available
+     */
+    manualMemoryCleanup() {
+        try {
+            // Clear require cache for non-essential modules
+            this.clearNonEssentialCache();
+            
+            // Force buffer cleanup
+            if (Buffer.poolSize) {
+                Buffer.poolSize = 0;
+            }
+            
+            // Clear timers and intervals
+            this.clearOrphanedTimers();
+            
+            console.log('🧹 Manual memory cleanup completed');
+        } catch (error) {
+            console.error('❌ Error during manual cleanup:', error.message);
+        }
+    }
+
+    /**
+     * Comprehensive memory cleanup
+     */
+    comprehensiveMemoryCleanup() {
+        try {
+            this.manualMemoryCleanup();
+            
+            // Additional cleanup for large objects
+            this.clearLargeObjectReferences();
+            
+            // Force V8 to release unused memory
+            if (process.memoryUsage) {
+                const usage = process.memoryUsage();
+                if (usage.heapUsed > this.memoryThreshold * 0.8) {
+                    console.log('🚨 High memory usage detected, performing deep cleanup');
+                    this.deepMemoryCleanup();
+                }
+            }
+            
+            console.log('🧹 Comprehensive memory cleanup completed');
+        } catch (error) {
+            console.error('❌ Error during comprehensive cleanup:', error.message);
         }
     }
 
@@ -162,6 +334,118 @@ class MemoryManager {
                 delete require.cache[key];
             }
         });
+    }
+
+    /**
+     * Clear non-essential require cache
+     */
+    clearNonEssentialCache() {
+        const essentialModules = [
+            'fs', 'path', 'os', 'crypto', 'util', 'events', 'stream',
+            'puppeteer', 'dotenv'
+        ];
+        
+        Object.keys(require.cache).forEach(key => {
+            const isEssential = essentialModules.some(module => 
+                key.includes(module) || key.includes('node_modules')
+            );
+            
+            if (!isEssential && !key.includes('core')) {
+                try {
+                    delete require.cache[key];
+                } catch (error) {
+                    // Ignore errors when clearing cache
+                }
+            }
+        });
+    }
+
+    /**
+     * Clear orphaned timers and intervals
+     */
+    clearOrphanedTimers() {
+        // Clear any global timers that might be holding references
+        if (global._scheduledTimers) {
+            global._scheduledTimers.clear();
+        }
+        
+        // Force cleanup of timer handles
+        if (process._getActiveHandles) {
+            const handles = process._getActiveHandles();
+            handles.forEach(handle => {
+                if (handle && handle.constructor && handle.constructor.name === 'Timeout') {
+                    try {
+                        handle.close();
+                    } catch (error) {
+                        // Ignore errors when closing handles
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * Clear large object references
+     */
+    clearLargeObjectReferences() {
+        // Clear global references that might hold large objects
+        if (global.searchResults) {
+            global.searchResults = null;
+        }
+        
+        if (global.browserInstances) {
+            global.browserInstances = null;
+        }
+        
+        if (global.cachedData) {
+            global.cachedData = null;
+        }
+        
+        // Clear any large arrays or objects in global scope
+        Object.keys(global).forEach(key => {
+            if (key.startsWith('_large') || key.startsWith('_cache')) {
+                try {
+                    global[key] = null;
+                } catch (error) {
+                    // Ignore errors when clearing global references
+                }
+            }
+        });
+    }
+
+    /**
+     * Deep memory cleanup for critical situations
+     */
+    deepMemoryCleanup() {
+        try {
+            // Clear all possible caches
+            this.clearNonEssentialCache();
+            this.clearLargeObjectReferences();
+            this.clearOrphanedTimers();
+            
+            // Force buffer cleanup
+            if (Buffer.poolSize) {
+                Buffer.poolSize = 0;
+            }
+            
+            // Clear V8 compilation cache
+            if (process.binding && process.binding('v8')) {
+                try {
+                    process.binding('v8').cachedDataVersionTag = 0;
+                } catch (error) {
+                    // Ignore if not available
+                }
+            }
+            
+            // Reduce memory readings to minimum
+            if (this.stats.memoryReadings.length > 10) {
+                this.stats.memoryReadings = this.stats.memoryReadings.slice(-10);
+            }
+            
+            console.log('🔧 Deep memory cleanup completed');
+        } catch (error) {
+            console.error('❌ Error during deep cleanup:', error.message);
+        }
     }
 
     /**
@@ -307,11 +591,12 @@ class MemoryManager {
     }
 
     /**
-     * Generate memory report
+     * Generate comprehensive memory report
      */
     generateReport() {
         const stats = this.getStats();
         const leakCheck = this.checkForMemoryLeaks();
+        const monitorReport = this.memoryMonitor.getMemoryReport();
         
         return {
             timestamp: new Date().toISOString(),
@@ -328,14 +613,41 @@ class MemoryManager {
                 trend: leakCheck.trend,
                 growthRate: leakCheck.growthRate ? `${(leakCheck.growthRate * 100).toFixed(2)}%` : 'N/A'
             },
-            recommendations: this.getRecommendations(stats, leakCheck)
+            monitor: {
+                current: monitorReport.current,
+                trends: monitorReport.trends,
+                summary: monitorReport.summary,
+                recommendations: monitorReport.recommendations
+            },
+            recommendations: this.getRecommendations(stats, leakCheck, monitorReport)
         };
+    }
+
+    /**
+     * Get memory monitor report
+     */
+    getMemoryMonitorReport() {
+        return this.memoryMonitor.getMemoryReport();
+    }
+
+    /**
+     * Export memory data for analysis
+     */
+    exportMemoryData(format = 'json') {
+        return this.memoryMonitor.exportMemoryData(format);
+    }
+
+    /**
+     * Force garbage collection through monitor
+     */
+    forceGarbageCollectionAdvanced() {
+        return this.memoryMonitor.forceGarbageCollection();
     }
 
     /**
      * Get optimization recommendations
      */
-    getRecommendations(stats, leakCheck) {
+    getRecommendations(stats, leakCheck, monitorReport = null) {
         const recommendations = [];
 
         if (stats.isNearThreshold) {
@@ -352,6 +664,11 @@ class MemoryManager {
 
         if (leakCheck.trend === 'increasing') {
             recommendations.push('Monitor memory usage closely - upward trend detected');
+        }
+
+        // Add monitor-specific recommendations
+        if (monitorReport && monitorReport.recommendations) {
+            recommendations.push(...monitorReport.recommendations.map(rec => rec.message));
         }
 
         return recommendations;

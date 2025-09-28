@@ -8,6 +8,8 @@ const { ORGANIC_BEHAVIOR } = require('../config/organic-behavior');
 const { PERFORMANCE_CONFIG } = require('../config/performance');
 const { DEVICE_CONFIGURATIONS_STRUCTURED: DEVICE_CONFIGURATIONS } = require('../config/device-configurations');
 const ProxyManager = require('./proxy-manager');
+const { ConcurrentOptimizer } = require('../utils/concurrent-optimizer');
+const { defaultLogger: Logger } = require('../utils/logger');
 
 class BrowserPool {
     constructor(maxBrowsers = PERFORMANCE_CONFIG.browserPoolSize) {
@@ -19,6 +21,16 @@ class BrowserPool {
         this.isShuttingDown = false;
         this.sessionRegistry = new Map(); // Track isolated sessions
         this.proxyManager = new ProxyManager(); // Initialize proxy manager
+        
+        // Concurrent optimizer for memory-efficient operations
+        this.concurrentOptimizer = new ConcurrentOptimizer({
+            maxConcurrency: Math.min(maxBrowsers, 3),
+            memoryThreshold: 300 * 1024 * 1024, // 300MB
+            batchSize: 5,
+            enableMemoryMonitoring: true,
+            enableGarbageCollection: true
+        });
+        
         this.stats = {
             created: 0,
             destroyed: 0,
@@ -26,6 +38,16 @@ class BrowserPool {
             errors: 0,
             isolatedSessions: 0
         };
+        
+        // Memory optimization settings
+        this.maxBrowserAge = 30 * 60 * 1000; // 30 minutes max age
+        this.maxBrowserUsage = 50; // Max uses per browser
+        this.memoryCheckInterval = 5 * 60 * 1000; // Check every 5 minutes
+        this.maxIdleBrowsers = 2; // Keep max 2 idle browsers
+        this.sessionCleanupInterval = 10 * 60 * 1000; // Cleanup sessions every 10 minutes
+        
+        // Start memory optimization
+        this.startMemoryOptimization();
     }
 
     /**
@@ -455,23 +477,37 @@ class BrowserPool {
         console.log('🛑 Shutting down browser pool...');
         this.isShuttingDown = true;
 
+        // Stop memory optimization
+        this.stopMemoryOptimization();
+
+        // Shutdown concurrent optimizer
+        if (this.concurrentOptimizer) {
+            await this.concurrentOptimizer.shutdown();
+        }
+
         // Reject all queued requests
         this.browserCreationQueue.forEach(({ reject }) => {
             reject(new Error('Browser pool is shutting down'));
         });
         this.browserCreationQueue = [];
 
-        // Close all browsers
-        const closePromises = this.browsers.map(async (browser) => {
+        // Close all browsers using concurrent optimizer if available
+        if (this.browsers.length > 0) {
             try {
-                await browser.close();
-                this.stats.destroyed++;
+                await this.releaseBrowsersConcurrent(this.browsers);
             } catch (error) {
-                console.error('❌ Error closing browser:', error.message);
+                // Fallback to sequential closing
+                const closePromises = this.browsers.map(async (browser) => {
+                    try {
+                        await browser.close();
+                        this.stats.destroyed++;
+                    } catch (error) {
+                        console.error('❌ Error closing browser:', error.message);
+                    }
+                });
+                await Promise.all(closePromises);
             }
-        });
-
-        await Promise.all(closePromises);
+        }
         
         this.browsers = [];
         this.availableBrowsers = [];
@@ -630,6 +666,292 @@ class BrowserPool {
             activeSessions,
             isolatedSessionsCreated: this.stats.isolatedSessions
         };
+    }
+
+    /**
+     * Start memory optimization routines
+     */
+    startMemoryOptimization() {
+        // Periodic memory check and cleanup
+        this.memoryCheckTimer = setInterval(() => {
+            this.performMemoryOptimization();
+        }, this.memoryCheckInterval);
+
+        // Session cleanup
+        this.sessionCleanupTimer = setInterval(() => {
+            this.cleanupExpiredSessions();
+        }, this.sessionCleanupInterval);
+
+        console.log('🧠 Browser pool memory optimization started');
+    }
+
+    /**
+     * Stop memory optimization routines
+     */
+    stopMemoryOptimization() {
+        if (this.memoryCheckTimer) {
+            clearInterval(this.memoryCheckTimer);
+            this.memoryCheckTimer = null;
+        }
+
+        if (this.sessionCleanupTimer) {
+            clearInterval(this.sessionCleanupTimer);
+            this.sessionCleanupTimer = null;
+        }
+
+        console.log('🧠 Browser pool memory optimization stopped');
+    }
+
+    /**
+     * Perform memory optimization
+     */
+    async performMemoryOptimization() {
+        try {
+            const now = Date.now();
+            const browsersToRecycle = [];
+
+            // Check for browsers that need recycling
+            for (const browser of this.browsers) {
+                const age = now - browser._createdAt;
+                const shouldRecycle = 
+                    age > this.maxBrowserAge || 
+                    browser._usageCount > this.maxBrowserUsage;
+
+                if (shouldRecycle && !this.busyBrowsers.includes(browser)) {
+                    browsersToRecycle.push(browser);
+                }
+            }
+
+            // Recycle old browsers
+            for (const browser of browsersToRecycle) {
+                await this.recycleBrowser(browser);
+                console.log(`♻️ Recycled browser ${browser._poolId} (age: ${Math.round((now - browser._createdAt) / 60000)}min, uses: ${browser._usageCount})`);
+            }
+
+            // Limit idle browsers
+            const idleBrowsers = this.availableBrowsers.length;
+            if (idleBrowsers > this.maxIdleBrowsers) {
+                const excessBrowsers = this.availableBrowsers.splice(this.maxIdleBrowsers);
+                for (const browser of excessBrowsers) {
+                    await this.destroyBrowser(browser);
+                    console.log(`🗑️ Destroyed excess idle browser ${browser._poolId}`);
+                }
+            }
+
+            // Force garbage collection on remaining browsers
+            for (const browser of this.availableBrowsers) {
+                try {
+                    const pages = await browser.pages();
+                    for (const page of pages) {
+                        if (!page.isClosed()) {
+                            await page.evaluate(() => {
+                                if (window.gc) {
+                                    window.gc();
+                                }
+                            });
+                        }
+                    }
+                } catch (error) {
+                    // Ignore errors during GC
+                }
+            }
+
+        } catch (error) {
+            console.error('❌ Error during browser pool memory optimization:', error.message);
+        }
+    }
+
+    /**
+     * Clean up expired sessions
+     */
+    cleanupExpiredSessions() {
+        const now = Date.now();
+        const expiredSessions = [];
+
+        for (const [sessionId, session] of this.sessionRegistry) {
+            const age = now - session.createdAt;
+            if (age > this.maxBrowserAge || session.status === 'closed') {
+                expiredSessions.push(sessionId);
+            }
+        }
+
+        for (const sessionId of expiredSessions) {
+            this.sessionRegistry.delete(sessionId);
+        }
+
+        if (expiredSessions.length > 0) {
+            console.log(`🧹 Cleaned up ${expiredSessions.length} expired sessions`);
+        }
+    }
+
+    /**
+     * Get memory usage statistics
+     */
+    getMemoryStats() {
+        const now = Date.now();
+        const browserAges = this.browsers.map(b => now - b._createdAt);
+        const browserUsages = this.browsers.map(b => b._usageCount);
+
+        return {
+            totalBrowsers: this.browsers.length,
+            availableBrowsers: this.availableBrowsers.length,
+            busyBrowsers: this.busyBrowsers.length,
+            activeSessions: this.sessionRegistry.size,
+            averageBrowserAge: browserAges.length > 0 ? Math.round(browserAges.reduce((a, b) => a + b, 0) / browserAges.length / 60000) : 0,
+            averageBrowserUsage: browserUsages.length > 0 ? Math.round(browserUsages.reduce((a, b) => a + b, 0) / browserUsages.length) : 0,
+            stats: this.stats
+        };
+    }
+
+    /**
+     * Force memory optimization
+     */
+    async optimizeMemory() {
+        await this.performMemoryOptimization();
+        this.cleanupExpiredSessions();
+        console.log('🧠 Browser pool memory optimization completed');
+    }
+
+    /**
+     * Create multiple browsers concurrently with memory optimization
+     */
+    async createBrowsersConcurrent(count, options = {}) {
+        if (this.isShuttingDown) {
+            throw new Error('Browser pool is shutting down');
+        }
+
+        const operations = Array.from({ length: count }, (_, index) => ({
+            name: `createBrowser_${index}`,
+            execute: async () => {
+                if (options.useProxy) {
+                    return await this.createProxyBrowser();
+                } else {
+                    return await this.createDirectBrowser();
+                }
+            }
+        }));
+
+        try {
+            const result = await this.concurrentOptimizer.executeConcurrent(operations, {
+                maxConcurrency: Math.min(count, 3),
+                batchSize: 3
+            });
+
+            Logger.info(`✅ Created ${result.results.length} browsers concurrently, ${result.errors.length} failed`);
+            return result;
+
+        } catch (error) {
+            Logger.error('❌ Concurrent browser creation failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Release multiple browsers concurrently with memory optimization
+     */
+    async releaseBrowsersConcurrent(browsers) {
+        if (!Array.isArray(browsers) || browsers.length === 0) {
+            return { results: [], errors: [] };
+        }
+
+        const operations = browsers.map((browser, index) => ({
+            name: `releaseBrowser_${browser._poolId || index}`,
+            execute: async () => {
+                return await this.releaseBrowser(browser);
+            }
+        }));
+
+        try {
+            const result = await this.concurrentOptimizer.executeConcurrent(operations, {
+                maxConcurrency: Math.min(browsers.length, 5),
+                batchSize: 5
+            });
+
+            Logger.info(`✅ Released ${result.results.length} browsers concurrently, ${result.errors.length} failed`);
+            return result;
+
+        } catch (error) {
+            Logger.error('❌ Concurrent browser release failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Perform health checks on multiple browsers concurrently
+     */
+    async healthCheckConcurrent(browsers = null) {
+        const browsersToCheck = browsers || this.browsers;
+        
+        if (browsersToCheck.length === 0) {
+            return { results: [], errors: [] };
+        }
+
+        const operations = browsersToCheck.map((browser, index) => ({
+            name: `healthCheck_${browser._poolId || index}`,
+            execute: async () => {
+                try {
+                    const pages = await browser.pages();
+                    const isConnected = browser.isConnected();
+                    
+                    return {
+                        browserId: browser._poolId,
+                        isConnected,
+                        pageCount: pages.length,
+                        usageCount: browser._usageCount || 0,
+                        lastUsed: browser._lastUsed || 0,
+                        healthy: isConnected && pages.length > 0
+                    };
+                } catch (error) {
+                    return {
+                        browserId: browser._poolId,
+                        healthy: false,
+                        error: error.message
+                    };
+                }
+            }
+        }));
+
+        try {
+            const result = await this.concurrentOptimizer.executeConcurrent(operations, {
+                maxConcurrency: Math.min(browsersToCheck.length, 5),
+                batchSize: 5,
+                promiseTimeout: 10000 // 10 seconds timeout for health checks
+            });
+
+            const healthyBrowsers = result.results.filter(r => r.result.healthy).length;
+            const unhealthyBrowsers = result.results.filter(r => !r.result.healthy).length;
+
+            Logger.info(`🏥 Health check completed: ${healthyBrowsers} healthy, ${unhealthyBrowsers} unhealthy browsers`);
+            
+            return {
+                ...result,
+                summary: {
+                    total: browsersToCheck.length,
+                    healthy: healthyBrowsers,
+                    unhealthy: unhealthyBrowsers,
+                    errors: result.errors.length
+                }
+            };
+
+        } catch (error) {
+            Logger.error('❌ Concurrent health check failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get concurrent optimizer statistics
+     */
+    getConcurrentStats() {
+        return this.concurrentOptimizer.getStats();
+    }
+
+    /**
+     * Update concurrent optimizer configuration
+     */
+    updateConcurrentConfig(config) {
+        Object.assign(this.concurrentOptimizer.config, config);
+        Logger.info('🔧 Updated concurrent optimizer configuration');
     }
 }
 
