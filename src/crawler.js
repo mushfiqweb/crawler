@@ -22,6 +22,7 @@ const { URLGenerator } = require('./utils/url-generator');
 const { PlatformSelector } = require('./utils/platform-selector');
 const { SystemValidator } = require('./validation/system-validator');
 const { HealthChecker } = require('./validation/health-checker');
+const { PostSearchCleanup } = require('./core/post-search-cleanup');
 
 // Import configurations
 const { ORGANIC_BEHAVIOR_CONFIG } = require('./config/organic-behavior');
@@ -41,6 +42,18 @@ class Crawler {
         this.platformSelector = new PlatformSelector();
         this.systemValidator = new SystemValidator();
         this.healthChecker = new HealthChecker();
+        
+        // Initialize PostSearchCleanup for comprehensive resource management
+        this.postSearchCleanup = new PostSearchCleanup({
+            browserTerminationTimeout: 35000,
+            memoryReleaseTimeout: 30000,
+            tempFileCleanupTimeout: 25000,
+            preserveSearchResults: true,
+            continueOnError: true,
+            detailedLogging: true,
+            logCleanupSteps: true,
+            logPerformanceMetrics: true
+        });
         
         // Initialize immediate processor for data processing and disposal
         this.immediateProcessor = new ImmediateProcessor({
@@ -388,7 +401,7 @@ class Crawler {
 
             // Check if we completed a cycle (based on total combinations)
             if (this.stats.totalSearches > 0 && this.stats.totalSearches % this.totalCombinations === 0) {
-                this.handleCycleCompletion();
+                await this.handleCycleCompletion();
             }
 
             // Schedule next search
@@ -513,10 +526,35 @@ class Crawler {
     /**
      * Handle cycle completion
      */
-    handleCycleCompletion() {
+    async handleCycleCompletion() {
         this.stats.currentCycle++;
         
         Logger.info(`🔄 Completed search cycle ${this.stats.currentCycle - 1}`);
+        
+        // Execute comprehensive resource cleanup at cycle completion
+        try {
+            Logger.info('🧹 Executing comprehensive cycle cleanup', {
+                cycle: this.stats.currentCycle - 1,
+                timestamp: new Date().toISOString(),
+                memoryBefore: this.formatMemoryUsage(process.memoryUsage())
+            });
+
+            const cleanupResult = await this.postSearchCleanup.executeCleanup();
+            
+            Logger.info('✅ Cycle cleanup completed successfully', {
+                cycle: this.stats.currentCycle - 1,
+                cleanupResult,
+                timestamp: new Date().toISOString(),
+                memoryAfter: this.formatMemoryUsage(process.memoryUsage())
+            });
+
+        } catch (cleanupError) {
+            Logger.error('❌ Error during cycle cleanup', {
+                cycle: this.stats.currentCycle - 1,
+                error: cleanupError.message,
+                timestamp: new Date().toISOString()
+            });
+        }
         
         // Re-randomize search sequence for next cycle
         this.searchCombinations = this.applyOrganicSequencing(this.searchCombinations);
@@ -818,6 +856,18 @@ class Crawler {
     updateStreamConfig(config) {
         this.streamConfig = { ...this.streamConfig, ...config };
         Logger.info('Stream configuration updated', this.streamConfig);
+    }
+
+    /**
+     * Format memory usage for logging
+     */
+    formatMemoryUsage(memUsage) {
+        return {
+            rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+            heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+            heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+            external: `${Math.round(memUsage.external / 1024 / 1024)}MB`
+        };
     }
 
     /**

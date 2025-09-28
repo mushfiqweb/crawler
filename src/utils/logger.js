@@ -259,6 +259,94 @@ class Logger {
     }
 
     /**
+     * Log resource management events with detailed timestamps and status
+     */
+    async logResourceEvent(eventType, resourceType, resourceId, status, details = {}) {
+        const timestamp = new Date().toISOString();
+        const statusEmoji = status === 'success' ? '✅' : status === 'error' ? '❌' : '🔄';
+        
+        await this.info(`${statusEmoji} Resource ${eventType}: ${resourceType}`, {
+            resourceId,
+            status,
+            timestamp,
+            ...details
+        });
+    }
+
+    /**
+     * Log browser resource events
+     */
+    async logBrowserResource(action, browserId, status, details = {}) {
+        const actionEmojis = {
+            'allocated': '🔗',
+            'released': '♻️',
+            'terminated': '🛑',
+            'registered': '🌐'
+        };
+        
+        await this.logResourceEvent(action, 'Browser', browserId, status, {
+            emoji: actionEmojis[action] || '🌐',
+            ...details
+        });
+    }
+
+    /**
+     * Log memory resource events
+     */
+    async logMemoryResource(action, memoryId, status, details = {}) {
+        const actionEmojis = {
+            'allocated': '💾',
+            'released': '🗑️',
+            'optimized': '⚡',
+            'registered': '📝'
+        };
+        
+        await this.logResourceEvent(action, 'Memory', memoryId, status, {
+            emoji: actionEmojis[action] || '💾',
+            ...details
+        });
+    }
+
+    /**
+     * Log cleanup operations with comprehensive details
+     */
+    async logCleanupOperation(operation, status, details = {}) {
+        const timestamp = new Date().toISOString();
+        const statusEmoji = status === 'success' ? '✅' : status === 'error' ? '❌' : '🧹';
+        
+        await this.info(`${statusEmoji} Cleanup ${operation}`, {
+            status,
+            timestamp,
+            duration: details.duration || 'N/A',
+            resourcesProcessed: details.resourcesProcessed || 0,
+            memoryBefore: details.memoryBefore || 'N/A',
+            memoryAfter: details.memoryAfter || 'N/A',
+            ...details
+        });
+    }
+
+    /**
+     * Log search lifecycle events with resource tracking
+     */
+    async logSearchLifecycle(phase, searchId, details = {}) {
+        const phaseEmojis = {
+            'initiated': '🔍',
+            'browser_allocated': '🌐',
+            'memory_registered': '💾',
+            'executing': '⚙️',
+            'cleanup_started': '🧹',
+            'cleanup_completed': '✅',
+            'completed': '🎯'
+        };
+        
+        await this.info(`${phaseEmojis[phase] || '📋'} Search ${phase}`, {
+            searchId,
+            timestamp: new Date().toISOString(),
+            ...details
+        });
+    }
+
+    /**
      * Create a child logger with additional context
      */
     child(context = {}) {
