@@ -17,6 +17,10 @@ const { RobustErrorHandler } = require('../utils/error-handler');
 const { ConcurrentOptimizer } = require('../utils/concurrent-optimizer');
 const ImmediateProcessor = require('../utils/immediate-processor');
 
+// Import resource management
+const { PostSearchCleanup } = require('./post-search-cleanup');
+const { defaultLogger: Logger } = require('../utils/logger');
+
 // Import Node.js streams for memory-efficient processing
 const { Readable, Transform, Writable } = require('stream');
 const { pipeline } = require('stream/promises');
@@ -39,6 +43,18 @@ class SearchEngine {
         this.humanBehavior = new HumanBehaviorSimulator();
         this.linkInteraction = new LinkInteractionSystem();
         this.errorHandler = new RobustErrorHandler();
+
+        // Initialize PostSearchCleanup for comprehensive resource management
+        this.postSearchCleanup = new PostSearchCleanup({
+            browserTerminationTimeout: 30000,
+            memoryReleaseTimeout: 25000,
+            tempFileCleanupTimeout: 20000,
+            preserveSearchResults: true,
+            continueOnError: true,
+            detailedLogging: true,
+            logCleanupSteps: true,
+            logPerformanceMetrics: true
+        });
 
         // Stream processing configuration
         this.streamConfig = {
@@ -93,11 +109,21 @@ class SearchEngine {
         }
 
         const startTime = Date.now();
+        const searchId = `search-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         let browser = null;
         let success = false;
 
         let result = null;
         let page = null;
+
+        // Log search initiation with detailed timestamp
+        Logger.info('🔍 Search operation initiated', {
+            searchId,
+            keyword,
+            platform,
+            timestamp: new Date().toISOString(),
+            memoryBefore: this.formatMemoryUsage(process.memoryUsage())
+        });
         
         try {
             console.log(createPlatformLog(platform, `Starting search for "${keyword}" on ${platform}`, 'search'));
@@ -109,6 +135,14 @@ class SearchEngine {
             } else {
                 browser = await this.browserPool.getBrowser();
             }
+
+            // Register browser with PostSearchCleanup for resource tracking
+            this.postSearchCleanup.registerBrowser(browser._poolId || `browser-${Date.now()}`, browser);
+            Logger.info('🌐 Browser registered for resource tracking', {
+                searchId,
+                browserId: browser._poolId,
+                timestamp: new Date().toISOString()
+            });
             
             // Get platform configuration
             const platformConfig = SEARCH_PLATFORMS.find(p => p.name.toLowerCase() === platform.toLowerCase());
@@ -118,6 +152,16 @@ class SearchEngine {
 
             // Create new page
             page = await browser.newPage();
+
+            // Register memory references for tracking
+            const memoryRef = { page, browser, searchData: { keyword, platform, searchId } };
+            this.postSearchCleanup.registerMemoryReference(`memory-${searchId}`, memoryRef, 
+                JSON.stringify(memoryRef).length);
+            Logger.info('💾 Memory reference registered for tracking', {
+                searchId,
+                memorySize: JSON.stringify(memoryRef).length,
+                timestamp: new Date().toISOString()
+            });
             
             // Configure page
             await this.configurePage(page, options);
@@ -160,10 +204,50 @@ class SearchEngine {
                 console.warn('⚠️ Error recording stats:', error.message);
             }
             
+            // Execute comprehensive resource cleanup with PostSearchCleanup
+            try {
+                Logger.info('🧹 Initiating comprehensive resource cleanup', {
+                    searchId,
+                    keyword,
+                    platform,
+                    timestamp: new Date().toISOString(),
+                    memoryBefore: this.formatMemoryUsage(process.memoryUsage())
+                });
+
+                // Execute cleanup with detailed logging
+                const cleanupResult = await this.postSearchCleanup.executeCleanup();
+                
+                // Log concise cleanup summary instead of detailed JSON
+                const summary = {
+                    searchId,
+                    status: cleanupResult.success ? 'SUCCESS' : 'FAILED',
+                    duration: `${cleanupResult.duration?.toFixed(0) || 0}ms`,
+                    browsersTerminated: cleanupResult.log?.steps?.find(s => s.name === 'Browser Process Termination')?.browsers?.length || 0,
+                    memoryRefsReleased: cleanupResult.log?.steps?.find(s => s.name === 'Memory Resource Release')?.references?.length || 0,
+                    gcIterations: cleanupResult.log?.steps?.find(s => s.name === 'Memory Resource Release')?.gcIterations?.length || 0,
+                    timestamp: new Date().toISOString(),
+                    totalDuration: `${Date.now() - startTime}ms`
+                };
+                
+                Logger.info('✅ Resource cleanup completed successfully', summary);
+
+            } catch (cleanupError) {
+                Logger.error('❌ Error during resource cleanup', {
+                    searchId,
+                    error: cleanupError.message,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            
             // Return browser to pool (wrapped in try-catch to prevent cleanup errors)
             try {
                 if (browser) {
                     await this.browserPool.releaseBrowser(browser);
+                    Logger.info('♻️ Browser released back to pool', {
+                        searchId,
+                        browserId: browser._poolId,
+                        timestamp: new Date().toISOString()
+                    });
                 }
             } catch (error) {
                 console.warn('⚠️ Error releasing browser:', error.message);
@@ -991,6 +1075,18 @@ class SearchEngine {
         if (this.immediateProcessor) {
             await this.immediateProcessor.shutdown();
         }
+    }
+
+    /**
+     * Format memory usage for logging
+     */
+    formatMemoryUsage(memUsage) {
+        return {
+            rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+            heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+            heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+            external: `${Math.round(memUsage.external / 1024 / 1024)}MB`
+        };
     }
 }
 
